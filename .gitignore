@@ -1,1 +1,7 @@
-data
+data/destinations.csv.gz
+data/sample_submission.csv.gz
+data/test.csv.gz
+data/train.csv.gz
+*.pyc
+*~
+*.swp
