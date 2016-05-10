@@ -11,8 +11,9 @@ import numpy as np          # for matrix handling.
 # - for reading ~.csv.gz file in data folder.
 class GzCsvReader:
     def __init__(self, filename):
-        gzfile = 'data/'+filename
-        self._gzfile = io.BufferedReader(gzip.open(gzfile, "r"))
+        self._filename = filename
+        self._gzname = 'data/'+filename
+        self._gzfile = io.BufferedReader(gzip.open(self._gzname, "r"))
         self._reader = csv.reader(io.TextIOWrapper(self._gzfile, newline=""))
         self._header = self._reader.next()        # header information.
 
@@ -42,7 +43,7 @@ D = lambda x:dp.parse(x + ' 12:00:00')          # date (yyyy-MM-dd)
 T = lambda x:x                                  # time (hh:mm:ss)
 DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss)
 MAX_ROW = -1                                     # maximum number of row to be read from csv (-1 means the unlimited)
-#MAX_ROW = 10000
+
 
 ##############################
 # class: DataSheet
@@ -151,7 +152,7 @@ class DataSheet(GzCsvReader):
                 if matrix_256.size > 0:
                     matrix = np.vstack((matrix, matrix_256))      # array push
                     print("Rows:%d"%(matrix.shape[0]))
-                    print(list)
+                    #print(list)
                 matrix_256 = np.array(list)
                 continue
             matrix_256 = np.vstack((matrix_256, list))               # array push
@@ -169,7 +170,60 @@ class DataSheet(GzCsvReader):
         except:
             return np.array([])
 
+    # save matrix to file
+    def save_to_file(self, filename=None):
+        filename = filename if filename else (self._filename + ".dat")
+        matrix = self._matrix if hasattr(self, '_matrix') else None
+        #! by using cPickle
+        if matrix is not None:
+            from six.moves import cPickle
+            f = open(filename, 'wb')
+            cPickle.dump(matrix, f, protocol=cPickle.HIGHEST_PROTOCOL)
+            f.close()
+        print('> saved to file :'+filename)
+        #end of cPickle
+        return filename
 
+    # load matrix object from file.
+    def load_from_file(self, filename=None):
+        filename = filename if filename else (self._filename + ".dat")
+        matrix = None
+        #! by using cPickle
+        if True:
+            from six.moves import cPickle
+            f = open(filename, 'rb')
+            matrix = cPickle.load(f)
+            f.close()
+        #end of cPickle
+        if matrix is not None:
+            self._matrix = matrix
+        print('> loaded from file :'+filename)
+        return filename
+
+    # clear all matrix data.
+    def clear(self):
+        self._matrix = np.array([])
+
+    # auto-loading (or populating & save back to file from matrix)
+    # Time Measure: 1.62s -> 0.08s with 1k data.
+    def load_auto(self, force_populate = None):
+        import os.path
+        fname = "data/"+self._filename+".0.dat"
+        print("INFO - load-auto : "+fname)
+        #- if there is no 0.dat file, then start populate.
+        is_file = os.path.isfile(fname)
+        if not is_file or force_populate:
+            print("INFO - started populating from gz-file"+self._gzname)
+            self.populate()
+            is_file = False
+
+        #- ok! now save back to file if not found.
+        if not is_file:
+            self.save_to_file(fname)
+        else:
+            self.load_from_file(fname)
+
+        return fname
 
 ##############################
 # class: SubmissionSheet
@@ -217,7 +271,6 @@ class DestinationSheet(DataSheet):
 # > count=2115, min=0, max=2117 ---
 # [('0', 55) ('1', 222) ('2', 17208) ..., ('2115', 37) ('2116', 72)
 #  ('2117', 634)]
-
 class TestSheet(DataSheet):
     def __init__(self):
         DataSheet.__init__(self, "test.csv.gz")
@@ -261,11 +314,42 @@ class TrainSheet(DataSheet):
 
 
 ##############################
+# Factory Class to load all required data-sheet
+class DataFactory():
+    instance = None
+    def __init__(self):
+        print("make DataFactory()")
+        self.init_sheets()
+
+    def init_sheets(self):
+        map = {}
+        map['submission'] = SubmissionSheet()
+        map['destination'] = DestinationSheet()
+        map['test'] = TestSheet()
+        map['train'] = TrainSheet()
+        self._map = map;
+
+        for k,o in map.iteritems():
+            print("--------------------------------")
+            print("Loading: "+str(k)+" -> "+str(o))
+            o.load_auto()
+
+    #@staticmethod
+    @classmethod
+    def load(cls):
+        #global instance
+        if cls.instance is None:
+            cls.instance = DataFactory()
+        return cls.instance
+
+
+##############################
 # Unit Test Class.
 class TestReader(unittest.TestCase):
     def test_sheet(self):
         print('test_sheet()...')
         test_DataReader()
+        test_Factory()
 
 
 ##############################
@@ -283,12 +367,18 @@ def test_DataReader(max=5, min=0):
     # print header first
     print(dr.header())
 
+    # for quick debugging.
+    global MAX_ROW
+    MAX_ROW = 1000
+
     # enumerate by next()
     #for i in range(min,10):
     #    print(dr.next())
     #    #dr.next_print()
 
-    dr.populate()
+    #! use load_auto()
+    #dr.populate()
+
     #print (dr._matrix)
     def print_col(dd, name):
         from itertools import groupby
@@ -316,6 +406,27 @@ def test_DataReader(max=5, min=0):
     #print_col(dr, "hotel_country")
     print_col(dr, "hotel_market")
     #print_col(dr, "hotel_cluster")
+
+    #save to file.
+    dr.save_to_file("data/test.dat")
+
+    #clear matrix data. => it must be empty [] array.
+    dr.clear()
+    print_col(dr, "hotel_market")
+
+    #load back from file.  => it must print same result before saving.
+    dr.load_from_file("data/test.dat")
+    print_col(dr, "hotel_market")
+
+    #ok! auto-load preliminary data (which was converted from original gz file, then saved back to file)
+    dr.load_auto()
+
+
+def test_Factory():
+    fact = DataFactory.load()
+    print(fact)
+    fact2 = DataFactory.load()
+    print(fact2)
 
 ##############################
 # Self Test Main.
