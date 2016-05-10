@@ -41,7 +41,8 @@ S = lambda x:x                                  # string
 D = lambda x:dp.parse(x + ' 12:00:00')          # date (yyyy-MM-dd)
 T = lambda x:x                                  # time (hh:mm:ss)
 DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss)
-
+MAX_ROW = -1                                     # maximum number of row to be read from csv (-1 means the unlimited)
+#MAX_ROW = 10000
 
 ##############################
 # class: DataSheet
@@ -61,6 +62,9 @@ class DataSheet(GzCsvReader):
     def next(self):
         #list = super(self.__class__, self).next()
         list = GzCsvReader.next(self)
+        return self.filter(list)
+
+    def filter(self, list):
         #out = [self.conv(x) for x in list]
         if self._is_conv:
             out = [self.conv(i,v) for i,v in enumerate(list)]
@@ -99,21 +103,61 @@ class DataSheet(GzCsvReader):
                 print("[%02d] %30s = %s"%(i, self._header[i], str(row[i])))
 
     # populate all data into matrix.
-    def populate_(self):
-        matrix = []
-        #for i in range(0, 99):    matrix.append(self.next())
-        for row in self: matrix.append(row)
-        self._matrix = np.array(matrix)
+    def populate(self):
+        return self.populate_3()
 
     # populate all data into matrix.
-    def populate(self):
+    # Time - 3k => 1.2s ,4k => 2s, 5k => 3.8s
+    def populate_1(self):
         list = self.next()
         matrix = np.array(list)
-        #for i in range(0, 10): matrix = np.vstack((matrix, self.next()))
-        #for row in self: matrix = np.vstack((matrix, row))
         for i,row in enumerate(self):
             matrix = np.vstack((matrix, row))               # array push
-            if(i > 200): break
+            if(MAX_ROW > 0 and i > MAX_ROW): break
+
+        self._matrix = matrix
+
+    # populate all data into matrix. (stack up every 100 list)
+    # Time2 - 5k => 0.24s
+    def populate_2(self):
+        list = self.next()
+        matrix = np.array(list)
+        matrix_100 = np.array([])
+        for i,row in enumerate(self):
+            if(MAX_ROW > 0 and i > MAX_ROW): break
+            if i%100 == 0:
+                if matrix_100.size > 0:
+                    matrix = np.vstack((matrix, matrix_100))      # array push
+                matrix_100 = np.array(row)
+                continue
+            matrix_100 = np.vstack((matrix_100, row))               # array push
+
+        if matrix_100.size > 0:
+            matrix = np.vstack((matrix, matrix_100))      # array push
+
+        self._matrix = matrix
+
+    # populate all data into matrix. (stack up every 1000 list)
+    # Time3 - 5k => 0.66s (at 1000), 0.22s at 200, 0.32 at 500
+    # Time3 - 10k => 9.9s (1024), 6.43s (512), 6.36 (256)
+    def populate_3(self):
+        list = self.next()
+        matrix = np.array(list)
+        matrix_256 = np.array([])
+        for i,row in enumerate(self):
+            list = self.filter(row)
+            if(MAX_ROW > 0 and i > MAX_ROW): break
+            if i%256 == 0:
+                if matrix_256.size > 0:
+                    matrix = np.vstack((matrix, matrix_256))      # array push
+                    print("Rows:%d"%(matrix.shape[0]))
+                    print(list)
+                matrix_256 = np.array(list)
+                continue
+            matrix_256 = np.vstack((matrix_256, list))               # array push
+
+        if matrix_256.size > 0:
+            matrix = np.vstack((matrix, matrix_256))      # array push
 
         self._matrix = matrix
 
@@ -123,7 +167,7 @@ class DataSheet(GzCsvReader):
             i = self._header.index(name)
             return self._matrix[:,i]
         except:
-            return []
+            return np.array([])
 
 
 
@@ -166,6 +210,14 @@ class DestinationSheet(DataSheet):
 ##############################
 # class: TestSheet
 # - Test data handling.
+# Rows:2,528,001
+# [2528001, datetime.datetime(2015, 11, 13, 7, 29, 43), 2, 3, 66, 348, 18487, 251.7068, 1198021, False, False, 10, datetime.datetime(2015, 11, 25, 12, 0), datetime.datetime(2015, 11, 29, 12, 0), 1, 0, 1, 9524, 1, 2, 50, 561]
+# --- hotel_market
+# [27 1540 699 ..., 628 905 1490]
+# > count=2115, min=0, max=2117 ---
+# [('0', 55) ('1', 222) ('2', 17208) ..., ('2115', 37) ('2116', 72)
+#  ('2117', 634)]
+
 class TestSheet(DataSheet):
     def __init__(self):
         DataSheet.__init__(self, "test.csv.gz")
@@ -176,8 +228,8 @@ class TestSheet(DataSheet):
                ,'user_location_country':I, 'user_location_region':I, 'user_location_city':I,'orig_destination_distance':F
                ,'user_id':I, 'is_mobile':B, 'is_package':B, 'channel':I
                ,'srch_ci':D, 'srch_co':D, 'srch_adults_cnt':I,'srch_children_cnt':I,'srch_rm_cnt':I
-               ,'srch_destination_id':I,'srch_destination_type_id':I,'is_booking':B
-               ,'cnt':I,'hotel_continent':I,'hotel_country':I,'hotel_market':I,'hotel_cluster':I}
+               ,'srch_destination_id':I,'srch_destination_type_id':I
+               ,'hotel_continent':I,'hotel_country':I,'hotel_market':I}
         # LUT = {}
         try:
             return LUT[name]
@@ -225,8 +277,8 @@ def test_DataReader(max=5, min=0):
     #dr = DataSheet(gzfile)
     #dr = SubmissionSheet()
     #dr = DestinationSheet()
-    #dr = TestSheet()
-    dr = TrainSheet()
+    dr = TestSheet()
+    #dr = TrainSheet()
 
     # print header first
     print(dr.header())
@@ -242,6 +294,10 @@ def test_DataReader(max=5, min=0):
         from itertools import groupby
         print ("--- " + name)
         cols = dd.cols(name)
+        print (cols)
+        if cols.size < 1:
+            print (">WARN! - empty ");
+            return
         cols.sort()
         grps = ((k, len(list(g))) for k, g in groupby(cols))            # grouping
         index = np.fromiter(grps, dtype='a8,u2')                        # a8 string len=8
@@ -251,18 +307,15 @@ def test_DataReader(max=5, min=0):
         # group : see http://stackoverflow.com/questions/4651683/numpy-grouping-using-itertools-groupby-performance
 
     #print_col(dr, "hotel_cluster")
-    print_col(dr, "site_name")
-    print_col(dr, "user_location_country")
-    print_col(dr, "orig_destination_distance")
-    print_col(dr, "srch_destination_id")
-    print_col(dr, "srch_destination_type_id")
-    print_col(dr, "hotel_continent")
-    print_col(dr, "hotel_country")
+    #print_col(dr, "site_name")
+    #print_col(dr, "user_location_country")
+    #print_col(dr, "orig_destination_distance")
+    #print_col(dr, "srch_destination_id")
+    #print_col(dr, "srch_destination_type_id")
+    #print_col(dr, "hotel_continent")
+    #print_col(dr, "hotel_country")
     print_col(dr, "hotel_market")
-    print_col(dr, "hotel_cluster")
-
-    x = print_col
-    x(dr, "srch_rm_cnt")
+    #print_col(dr, "hotel_cluster")
 
 ##############################
 # Self Test Main.
