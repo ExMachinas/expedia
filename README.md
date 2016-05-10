@@ -15,8 +15,14 @@ Download test data files into data folder (see: https://www.kaggle.com/c/expedia
 * destinations.csv.gz
 * sample_submission.csv.gz
 
-# Running
+# Run
 ```
 $ cd ..
 $ python main.py
 ```
+
+# Run in background with out.log
+```
+$ nohup python -u main.py >> out.log 2>&1 &
+```
+
