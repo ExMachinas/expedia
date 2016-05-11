@@ -5,6 +5,7 @@ import unittest
 import gzip, csv, io
 import dateutil.parser as dp
 import numpy as np          # for matrix handling.
+from datetime import datetime, timedelta
 
 ##############################
 # class: GzCsvReader
@@ -35,13 +36,35 @@ class GzCsvReader:
 
 ##############################
 # Common Definitions
-B = lambda x:True if int(x) != 0 else False     # boolean
+#B = lambda x:True if int(x) != 0 else False     # boolean (better than int)
+B = lambda x:1 if int(x) != 0 else 0            # boolean
 I = lambda x:int(x) if x != '' else 0           # integer
 F = lambda x:float(x) if x != '' else 0         # float
 S = lambda x:x                                  # string
 D = lambda x:dp.parse(x + ' 12:00:00')          # date (yyyy-MM-dd)
 T = lambda x:x                                  # time (hh:mm:ss)
-DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss)
+DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss) !WARN! TOO SLOW FUNCTION.
+
+#------------------------------
+# IMPROVE DATETIME PARSER.
+Dd = lambda x: [int(i) for i in x.split('-')]    # date (yyyy-MM-dd)
+Dt = lambda x: [int(i) for i in x.split(':')]    # time (hh:mm:ss)
+
+EPOCH = datetime(1970, 1, 1) # use POSIX epoch
+
+def DT(x):
+    if x=='': return 0
+    y = x.split(' ')
+    d,t = [Dd(y[0]), Dt(y[1])]
+    t0 = datetime(d[0], d[1], d[2], t[0], t[1], t[2])
+    td = (t0 - EPOCH)
+    return td.total_seconds()
+    #return t0                                   # datetime() seems smaller than float type.
+
+def D(x):
+    if x == '': return 0
+    return DT(x + ' 12:00:00')
+
 MAX_ROW = -1                                     # maximum number of row to be read from csv (-1 means the unlimited)
 
 
@@ -91,6 +114,7 @@ class DataSheet(GzCsvReader):
             return f(v) if f else v
         except:
             print('ERR! convert colume %s - "%s" '%(i,str(v)))
+            raise
             return v
 
     # print next row with column name
@@ -105,7 +129,7 @@ class DataSheet(GzCsvReader):
 
     # populate all data into matrix.
     def populate(self):
-        return self.populate_3()
+        return self.populate_4()
 
     # populate all data into matrix.
     # Time - 3k => 1.2s ,4k => 2s, 5k => 3.8s
@@ -143,7 +167,7 @@ class DataSheet(GzCsvReader):
     # Time3 - 10k => 9.9s (1024), 6.43s (512), 6.36 (256)
     def populate_3(self):
         list = self.next()
-        matrix = np.array(list)
+        matrix = np.array(list, dtype=np.float32)
         matrix_256 = np.array([])
         for i,row in enumerate(self):
             list = self.filter(row)
@@ -152,15 +176,73 @@ class DataSheet(GzCsvReader):
                 if matrix_256.size > 0:
                     matrix = np.vstack((matrix, matrix_256))      # array push
                     print("Rows:%d"%(matrix.shape[0]))
-                    #print(list)
-                matrix_256 = np.array(list)
+                    print(list)
+                matrix_256 = np.array(list, dtype=np.float32)
                 continue
-            matrix_256 = np.vstack((matrix_256, list))               # array push
+            list_1 = np.array(list, dtype=np.float32)
+            matrix_256 = np.vstack((matrix_256, list_1))               # array push
 
         if matrix_256.size > 0:
             matrix = np.vstack((matrix, matrix_256))      # array push
 
         self._matrix = matrix
+
+    # populate#4 - save intermitent file every 1M lines. then rebuild.
+    def populate_4(self):
+        PACK_ROW = 500000
+        matrix = None
+        next_id = 0
+        for i,row in enumerate(self):
+            list = self.filter(row)
+            list = np.array(list, dtype=np.float32)
+            if(MAX_ROW > 0 and i >= MAX_ROW): break
+
+            # print status every 1k
+            if i%1000 == 0:
+                print("Rows: %d"%(i))
+                #print(list)
+
+            # do every 1M lines
+            if i%PACK_ROW == 0:
+                if matrix is not None:
+                    print(list)
+                    #save to temp file.
+                    filename = "data/%s-%04d"%(self._filename, next_id)
+                    self._matrix = matrix
+                    self.save_to_file(filename)
+                    next_id = next_id + 1
+                    matrix = None
+                # save current-list to matrix
+                matrix = list
+                # next-loop
+                continue
+            # push next-list
+            matrix = np.vstack((matrix, list))               # array push
+
+        # for the remained data.
+        if matrix is not None:
+            print(list)
+            #save to temp file.
+            filename = "data/%s-%04d"%(self._filename, next_id)
+            self._matrix = matrix
+            self.save_to_file(filename)
+            next_id = next_id + 1
+            matrix = None
+
+        #TODO - rebuild whole matrix from temp-file.
+        matrix = None
+        for id in range(0, next_id):
+            filename = "data/%s-%04d"%(self._filename, id)
+            self.load_from_file(filename)
+            if matrix is None:
+                matrix = self._matrix
+            else:
+                matrix = np.vstack((matrix, self._matrix))               # array push
+
+        # save back into member matrix.
+        self._matrix = matrix
+        return matrix
+
 
     # find-out all value for column
     def cols(self, name):
@@ -186,10 +268,11 @@ class DataSheet(GzCsvReader):
 
     # load matrix object from file.
     def load_from_file(self, filename=None):
+        import os.path
         filename = filename if filename else (self._filename + ".dat")
         matrix = None
         #! by using cPickle
-        if True:
+        if os.path.isfile(filename):
             from six.moves import cPickle
             f = open(filename, 'rb')
             matrix = cPickle.load(f)
@@ -323,9 +406,9 @@ class DataFactory():
 
     def init_sheets(self):
         map = {}
-        map['submission'] = SubmissionSheet()
-        map['destination'] = DestinationSheet()
-        map['test'] = TestSheet()
+        #map['submission'] = SubmissionSheet()
+        #map['destination'] = DestinationSheet()
+        #map['test'] = TestSheet()
         map['train'] = TrainSheet()
         self._map = map;
 
@@ -369,7 +452,7 @@ def test_DataReader(max=5, min=0):
 
     # for quick debugging.
     global MAX_ROW
-    MAX_ROW = 1000
+    MAX_ROW = 2000
 
     # enumerate by next()
     #for i in range(min,10):
@@ -384,6 +467,7 @@ def test_DataReader(max=5, min=0):
         from itertools import groupby
         print ("--- " + name)
         cols = dd.cols(name)
+        print ('Count:'+str(cols.size))
         print (cols)
         if cols.size < 1:
             print (">WARN! - empty ");
@@ -419,7 +503,10 @@ def test_DataReader(max=5, min=0):
     print_col(dr, "hotel_market")
 
     #ok! auto-load preliminary data (which was converted from original gz file, then saved back to file)
-    dr.load_auto()
+    dr.load_auto(True)
+
+    #print again.
+    print_col(dr, "hotel_market")
 
 
 def test_Factory():
