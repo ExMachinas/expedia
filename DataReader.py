@@ -188,24 +188,51 @@ class DataSheet(GzCsvReader):
         self._matrix = matrix
 
     # populate#4 - save intermitent file every 1M lines. then rebuild.
+    # Time: 290ms for 2048 data-read.
     def populate_4(self):
-        PACK_ROW = 500000
+        RCOUNT = 256
+        PACK_ROW = RCOUNT*1024*4        # 4k * 256 = 1M
+
+        # read rows
+        def read_rows(count):
+            mat = None
+            for i in range(0, count):
+                row = self.next()
+                row = np.array(row, dtype=np.float32)   # convert to float
+                if row.size < 1: break;     # it must be EOL
+                if mat is None:
+                    mat = row
+                else:
+                    mat = np.vstack((mat, row))
+            return mat
+
+        # enumerate all rows.
         matrix = None
         next_id = 0
-        for i,row in enumerate(self):
-            list = self.filter(row)
-            list = np.array(list, dtype=np.float32)
-            if(MAX_ROW > 0 and i >= MAX_ROW): break
+        i = 0
+        while(True):
+            rows = read_rows(RCOUNT)
+            if rows is None: break          # must be EOL
+
+            # increase row number
+            i += rows.shape[0]
+
+            # check max-row.
+            if(MAX_ROW > 0 and i >= MAX_ROW):
+                # init or push next-list
+                if matrix is None:
+                    matrix = rows
+                else:
+                    matrix = np.vstack((matrix, rows))               # array push
+                break
 
             # print status every 1k
-            if i%1000 == 0:
+            if i%(RCOUNT*4) == 0:
                 print("Rows: %d"%(i))
-                #print(list)
 
             # do every 1M lines
             if i%PACK_ROW == 0:
                 if matrix is not None:
-                    print(list)
                     #save to temp file.
                     filename = "data/%s-%04d"%(self._filename, next_id)
                     self._matrix = matrix
@@ -213,15 +240,18 @@ class DataSheet(GzCsvReader):
                     next_id = next_id + 1
                     matrix = None
                 # save current-list to matrix
-                matrix = list
+                matrix = rows
                 # next-loop
                 continue
-            # push next-list
-            matrix = np.vstack((matrix, list))               # array push
+
+            # init or push next-list
+            if matrix is None:
+                matrix = rows
+            else:
+                matrix = np.vstack((matrix, rows))               # array push
 
         # for the remained data.
         if matrix is not None:
-            print(list)
             #save to temp file.
             filename = "data/%s-%04d"%(self._filename, next_id)
             self._matrix = matrix
