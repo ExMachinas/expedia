@@ -24,7 +24,10 @@ class GzCsvReader:
 
     # next
     def next(self):
-        return self._reader.next()
+        try:
+            return self._reader.next()
+        except:
+            return None
 
     # iterate support like (for x in self)
     def __iter__(self):
@@ -35,7 +38,7 @@ class GzCsvReader:
         self._gzfile.close()
 
 ##############################
-# Common Definitions
+# Common Data Conversion Func
 #B = lambda x:True if int(x) != 0 else False     # boolean (better than int)
 B = lambda x:1 if int(x) != 0 else 0            # boolean
 I = lambda x:int(x) if x != '' else 0           # integer
@@ -43,7 +46,7 @@ F = lambda x:float(x) if x != '' else 0         # float
 S = lambda x:x                                  # string
 D = lambda x:dp.parse(x + ' 12:00:00')          # date (yyyy-MM-dd)
 T = lambda x:x                                  # time (hh:mm:ss)
-DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss) !WARN! TOO SLOW FUNCTION.
+DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss) !WARN! EASY BUT TOO SLOW FUNCTION.
 
 #------------------------------
 # IMPROVE DATETIME PARSER.
@@ -54,12 +57,14 @@ EPOCH = datetime(1970, 1, 1) # use POSIX epoch
 
 def DT(x):
     if x=='': return 0
-    y = x.split(' ')
-    d,t = [Dd(y[0]), Dt(y[1])]
-    t0 = datetime(d[0], d[1], d[2], t[0], t[1], t[2])
-    td = (t0 - EPOCH)
-    return td.total_seconds()
-    #return t0                                   # datetime() seems smaller than float type.
+    try:
+        y = x.split(' ')
+        d,t = [Dd(y[0]), Dt(y[1])]
+        t0 = datetime(d[0], d[1], d[2], t[0], t[1], t[2])
+        td = (t0 - EPOCH)
+        return td.total_seconds()
+    except:
+        return -1                               # -1 means invalid-time-data.
 
 def D(x):
     if x == '': return 0
@@ -82,11 +87,14 @@ class DataSheet(GzCsvReader):
         # flag to auto-convert
         self._is_conv = True
 
-    # move next()
+    # move next(), and return the converted [] array.
     def next(self):
         #list = super(self.__class__, self).next()
         list = GzCsvReader.next(self)
-        return self.filter(list)
+        if list is None:
+            return []
+        else:
+            return self.filter(list)
 
     def filter(self, list):
         #out = [self.conv(x) for x in list]
@@ -438,8 +446,8 @@ class DataFactory():
         map = {}
         #map['submission'] = SubmissionSheet()
         #map['destination'] = DestinationSheet()
-        #map['test'] = TestSheet()
-        map['train'] = TrainSheet()
+        map['test'] = TestSheet()
+        #map['train'] = TrainSheet()
         self._map = map;
 
         for k,o in map.iteritems():
