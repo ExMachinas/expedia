@@ -209,16 +209,17 @@ class MatrixStack():
 
     # test data itself ..........................................
     @time_usage
-    def test(self):
+    def test(self, print_deep=False):
         # print current matrix status.
         cnt = lambda x: len(x) if x is not None else 0
-        print('count=%d, matrix.size=%d, mat256.size=%d '%(self._count, cnt(self._matrix), cnt(self._matrix_256)))
-        for i,m in enumerate(self._matrix):
-            print('--------- : [%d/%d]'%(i, cnt(self._matrix)))
-            print(m[0:10,0:9])
-        if self._matrix_256 is not None:
-            print('--------- : [last]')
-            print(self._matrix_256[0:10,0:9])
+        print('mstack[%s] count=%d, matrix.size=%d, mat256.size=%d '%(self._name, self._count, cnt(self._matrix), cnt(self._matrix_256)))
+        if print_deep:
+            for i,m in enumerate(self._matrix):
+                print('--------- : [%d/%d]'%(i, cnt(self._matrix)))
+                print(m[0:10,0:9])
+            if self._matrix_256 is not None:
+                print('--------- : [last]')
+                print(self._matrix_256[0:10,0:9])
 
 
 ##############################
@@ -284,8 +285,8 @@ class DataSheet(GzCsvReader):
                 print("[%02d] %30s = %s"%(i, self._header[i], str(row[i])))
 
     # populate all data into matrix.
-    def populate(self):
-        return self.populate_4()
+    def populate(self, force_reload = False):
+        return self.populate_4(force_reload)
 
     # populate all data into matrix.
     # Time - 3k => 1.2s ,4k => 2s, 5k => 3.8s
@@ -297,6 +298,7 @@ class DataSheet(GzCsvReader):
             if(MAX_ROW > 0 and i > MAX_ROW): break
 
         self._matrix = matrix
+        return True
 
     # populate all data into matrix. (stack up every 100 list)
     # Time2 - 5k => 0.24s
@@ -317,6 +319,7 @@ class DataSheet(GzCsvReader):
             matrix = np.vstack((matrix, matrix_100))      # array push
 
         self._matrix = matrix
+        return True
 
     # populate all data into matrix. (stack up every 1000 list)
     # Time3 - 5k => 0.66s (at 1000), 0.22s at 200, 0.32 at 500
@@ -342,10 +345,44 @@ class DataSheet(GzCsvReader):
             matrix = np.vstack((matrix, matrix_256))      # array push
 
         self._matrix = matrix
+        return True
 
     # populate#4 - save intermitent file every 1M lines. then rebuild.
     # Time: 290ms for 2048 data-read.
-    def populate_4(self):
+    @time_usage
+    def populate_4(self, force_build = False):
+        import os.path
+        # merge back splited file into one file with vstack.
+        @time_usage
+        def merge_split_to_matrix(thiz, max):
+            #- rebuild whole matrix from temp-file.
+            matrix = None
+            for fid in range(0, max):
+                filename = "data/%s-%04d"%(thiz._filename, fid)
+                is_file = os.path.isfile(filename)
+                if not is_file: break
+                thiz.load_from_file(filename)
+                print("> [%d] loaded matrix.count = %d "%(fid, len(thiz._matrix)))
+                if matrix is None:
+                    matrix = thiz._matrix
+                else:
+                    matrix = np.vstack((matrix, thiz._matrix))               # array push input matrix
+
+            print(">> Total matrix Count = %d"%(len(matrix)))
+            thiz._matrix = matrix
+            return matrix
+
+        # check if the temp-file exists already.
+        if not force_build:
+            filename = "data/%s-%04d"%(self._filename, 0)
+            is_file = os.path.isfile(filename)
+            if is_file:
+                print("INFO - start populating from cached files : "+filename)
+                merge_split_to_matrix(self, 999)
+                return True
+
+        ############
+        # Build temp files.
         RCOUNT = 256
         PACK_ROW = RCOUNT*1024*4        # 4k * 256 = 1M
 
@@ -415,20 +452,12 @@ class DataSheet(GzCsvReader):
             next_id = next_id + 1
             matrix = None
 
-        #TODO - rebuild whole matrix from temp-file.
-        matrix = None
-        for id in range(0, next_id):
-            filename = "data/%s-%04d"%(self._filename, id)
-            self.load_from_file(filename)
-            if matrix is None:
-                matrix = self._matrix
-            else:
-                matrix = np.vstack((matrix, self._matrix))               # array push
+        # merge all temp-file to single
+        matrix = merge_split_to_matrix(self, next_id)
 
         # save back into member matrix.
         self._matrix = matrix
-        return matrix
-
+        return True
 
     # find-out all value for column
     def cols(self, name):
@@ -488,7 +517,7 @@ class DataSheet(GzCsvReader):
 
     # auto-loading (or populating & save back to file from matrix)
     # Time Measure: 1.62s -> 0.08s with 1k data.
-    def load_auto(self, force_populate = None):
+    def load_auto(self, force_populate = False):
         import os.path
         fname = "data/"+self._filename+".0.dat"
         print("INFO - load-auto : "+fname)
@@ -496,7 +525,7 @@ class DataSheet(GzCsvReader):
         is_file = os.path.isfile(fname)
         if not is_file or force_populate:
             print("INFO - started populating from gz-file"+self._gzname)
-            self.populate()
+            self.populate(force_populate)
             is_file = False
 
         #- ok! now save back to file if not found.

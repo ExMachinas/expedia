@@ -45,8 +45,8 @@ def do_transform_train():
     from DataReader import TransTrain00
     # load transformer.
     mstack = TransTrain00()
-    #mstack.transform()
-    mstack.transform(force=True)
+    mstack.transform()
+    #mstack.transform(force=True)
     mstack.test()
 
 # Self Test Main.
