@@ -88,12 +88,24 @@ def DTR(timestamp):             # DT Reverse from second to Datetme.
 
 MAX_ROW = -1                                     # maximum number of row to be read from csv (-1 means the unlimited)
 
+#------------------------------
+# time-usage print
+import time
+def time_usage(func):
+    def wrapper(*args, **kwargs):
+        beg_ts = time.time()
+        func(*args, **kwargs)
+        end_ts = time.time()
+        print("%s - elapsed time: %f" % (func.func_name, end_ts - beg_ts))
+    return wrapper
+
 ##############################
 # class: MatrixStack
 # - to handle large size of matrix in stack for cut/merge
-MATSTACK_GRP_SIZE = 10
+MATSTACK_GRP_SIZE = 10              # 255
 class MatrixStack():
-    def __init__(self):
+    def __init__(self, name = None):
+        self._name = name              # used in file saving.
         self._matrix = []              # to save group of matrix in array.
         self._matrix_256 = None
         self._count = 0                # number of rows in matrix.
@@ -146,47 +158,67 @@ class MatrixStack():
             self._matrix.append(self._matrix_256)
             self._matrix_256 = None
 
+    # get filename from given name
+    def as_filename(self, name = None):
+        name = name if name else self._name
+        name = name if name else "def"
+        filename = "data/mstack-"+name+".dat"
+        return filename
+
     # save matrix into file......................................
-    def save_to_file(self, filename=None):
-        filename = filename if filename else "matrix-stack.dat"
+    # @return True if saved
+    def save_to_file(self, name=None):
+        filename = self.as_filename(name)
         self.pack()
         if self._matrix is not None:
             from six.moves import cPickle
             f = open(filename, 'wb')
             cPickle.dump((self._count, self._matrix), f, protocol=cPickle.HIGHEST_PROTOCOL)
             f.close()
-        print('matrix-stack: saved to file :'+filename+', count='+str(self._count))
-        return filename
+            print('matrix-stack: saved to file :'+filename+', count='+str(self._count))
+            return True
+        else:
+            return False
 
     # load matrix object from file...............................
-    def load_from_file(self, filename=None):
+    # @return True if load (and file exists)
+    def load_from_file(self, name=None):
         import os.path
-        filename = filename if filename else "matrix-stack.dat"
+        filename = self.as_filename(name)
         self.reset()
         matrix = None
         count = 0
+
+        # check if file exists.
         if os.path.isfile(filename):
             from six.moves import cPickle
             f = open(filename, 'rb')
             (count, matrix) = cPickle.load(f)
             f.close()
+        else:
+            return False
+
+        # check if data loaded.
         if matrix is not None:
             self._count = count
             self._matrix = matrix
-        print('matrix-stack: loaded from file :'+filename+", count="+str(count))
-        return filename
+            print('matrix-stack: loaded from file :'+filename+", count="+str(count))
+            return True
+        else:
+            return False
 
     # test data itself ..........................................
+    @time_usage
     def test(self):
+        # print current matrix status.
         cnt = lambda x: len(x) if x is not None else 0
         print('count=%d, matrix.size=%d, mat256.size=%d '%(self._count, cnt(self._matrix), cnt(self._matrix_256)))
-        for m in self._matrix:
-            print('---------')
-            print(m[0:10,0:8])
+        for i,m in enumerate(self._matrix):
+            print('--------- : [%d/%d]'%(i, cnt(self._matrix)))
+            print(m[0:10,0:9])
         if self._matrix_256 is not None:
-            print('=========')
-            print(self._matrix_256[0:2,0:8])
-
+            print('--------- : [last]')
+            print(self._matrix_256[0:10,0:9])
 
 
 ##############################
@@ -448,6 +480,12 @@ class DataSheet(GzCsvReader):
     def clear(self):
         self._matrix = np.array([])
 
+
+    # count of rows in matrix
+    def count(self):
+        cnt = lambda x: len(x) if x is not None else 0
+        return cnt(self._matrix)
+
     # auto-loading (or populating & save back to file from matrix)
     # Time Measure: 1.62s -> 0.08s with 1k data.
     def load_auto(self, force_populate = None):
@@ -494,6 +532,7 @@ class DestinationSheet(DataSheet):
     def __init__(self):
         DataSheet.__init__(self, "destinations.csv.gz")
         self._map = None
+        self._missed = {}           # not-found count of destination_id
 
     #! override def_filter()
     def def_filter(self, col, name):
@@ -520,6 +559,13 @@ class DestinationSheet(DataSheet):
         try:
             return self._map[dest_id]
         except:
+            if self._missed.has_key(dest_id):
+                self._missed[dest_id] = self._missed[dest_id] + 1
+            else:
+                self._missed[dest_id] = 0
+
+            if self._missed[dest_id] % 100 == 0:
+                print('- WARN! dest not found id:%d (missed %d)'%(dest_id, self._missed[dest_id]+1))
             return None
 
 
@@ -574,18 +620,19 @@ class TrainSheet(DataSheet):
         except:
             return lambda x:x
 
-
 ##############################
 # Factory Class to load all required data-sheet
 class DataFactory():
     instance = None
-    def __init__(self):
+    def __init__(self, reload):
         print("make DataFactory()")
+        self._reload = reload
         self.init_sheets()
 
     def init_sheets(self):
         map = {}
-        map['submission'] = SubmissionSheet()
+        #TODO:XENI - not yet use submission
+        #map['submission'] = SubmissionSheet()
         map['destination'] = DestinationSheet()
         map['test'] = TestSheet()
         map['train'] = TrainSheet()
@@ -594,7 +641,10 @@ class DataFactory():
         for k,o in map.iteritems():
             print("--------------------------------")
             print("Loading: "+str(k)+" -> "+str(o))
-            o.load_auto()
+            if self._reload:
+                o.load_auto(True)           # force to reload data.
+            else:
+                o.load_auto()               # normal loading.
 
     # get DataReader instance for the given name
     def get(self, name):
@@ -602,21 +652,107 @@ class DataFactory():
 
     #@staticmethod
     @classmethod
-    def load(cls):
+    def load(cls, reload=False):
         #global instance
         if cls.instance is None:
-            cls.instance = DataFactory()
+            cls.instance = DataFactory(reload)
         return cls.instance
 
+'''
+------------------------------------------------------------------------------------------------------------------------
+Transform Class
+- transform each row of traint/test data to vector
+'''
+##############################
+# class: TransTrain Case00
+class TransTrain00(MatrixStack):
+    def __init__(self):
+        MatrixStack.__init__(self, "train00")
 
+    # transform test-date to temporal matrix-stack array.
+    def transform(self, train = None, dest = None, force = False):
+        print("TransTrain00.transform(force=%s)...."%("True" if force else "False"))
+        fact = DataFactory.load()
+        train = train if train else fact.get('train')
+        dest = dest if dest else fact.get('destination')
 
+        # transform the input date to array [msec, week, holiday?]
+        # @arg dmsec date-second since EPOCH (see DT() function)
+        def trans_date(dsec, isSeason = False):
+            ret = []
+            d = DTR(dsec)
+            #weekday : Monday is 0 and Sunday is 6
+            HOLIDAY = [0,0,0,0,0.5,1,1]
+            SEASON = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
+            SEASON_KEY = [0,0,1,1,1,2,2,2,3,3,3,0]      # season key by month.
+            #ret.extend([d.year, d.month, d.day, d.weekday(), HOLIDAY[d.weekday()], d.hour])
+            ret += [d.year, HOLIDAY[d.weekday()]]
+            if isSeason:
+                ret += SEASON[SEASON_KEY[d.month-1]]
+            return ret
+
+        def diff_date(co, ci):
+            dx = [(co - ci)/(60*60*24)]
+            #if True: print(str(DTR(co))+" - "+str(DTR(ci))+" = "+str(dx))
+            return dx
+
+        # transform each row of train/test data to single array.
+        def trans_train_row(i, R, train):
+            row = []
+            row = [i]           #for test in order to track row number.
+            # date-time (only save the 1st click-date, and difference from now)
+            row += trans_date(R[train.date_time]) + trans_date(R[train.srch_ci], True) # + trans_date(R[train.srch_co], True)
+            row += diff_date(R[train.srch_ci], R[train.date_time])     # ci - time (in day)
+            row += diff_date(R[train.srch_co], R[train.srch_ci])      # co - ci (in day)
+            # count
+            row += [R[train.channel], R[train.is_mobile], R[train.is_package]]
+            row += [R[train.srch_adults_cnt], R[train.srch_children_cnt], R[train.srch_rm_cnt]]
+            # locations
+            row += [R[train.posa_continent], R[train.user_location_country], R[train.user_location_region], R[train.user_location_city]]
+            row += [R[train.srch_destination_type_id], R[train.hotel_continent], R[train.hotel_country], R[train.hotel_market]]
+            dest_row = dest.lookup(R[train.srch_destination_id])
+            #TODO:XENI - dest_row can be None, for now ignore this case (TODO IMPROVE)
+            if dest_row is None:
+                return None
+            return row
+
+        @time_usage
+        def run_transform(mstack):
+            #test-case : enumerate each set.
+            for i,R in enumerate(train._matrix):
+                row = trans_train_row(i, R, train)
+                if row is None: continue
+                mstack.push(row, np.int32)
+                #print(str(DTR(R[train.date_time]))+':'+str(row))
+
+        # MatrixStack
+        #mstack = MatrixStack()
+        mstack = self
+
+        if force:
+            run_transform(mstack)
+            mstack.save_to_file()
+        else:      # if failed to load
+            loaded = self.load_from_file()
+            if not loaded:
+                run_transform(mstack)
+                mstack.save_to_file()
+
+        return True
+
+'''
+------------------------------------------------------------------------------------------------------------------------
+Test Functions to verify each function method.
+'''
 ##############################
 # Unit Test Class.
 class TestReader(unittest.TestCase):
     def test_sheet(self):
         print('test_sheet()...')
-        test_DataReader()
-        test_Factory()
+        test_timestamp()
+        #test_DataReader()
+        #test_Factory()
+        test_matstack()
 
 #print (dr._matrix)
 def print_col(dd, name):
@@ -654,7 +790,7 @@ def test_DataReader(max=5, min=0):
 
     # for quick debugging.
     global MAX_ROW
-    MAX_ROW = 2000
+    MAX_ROW = 2500
 
     # enumerate by next()
     #for i in range(min,10):
@@ -669,7 +805,7 @@ def test_DataReader(max=5, min=0):
     #print_col(dr, "user_location_country")
     #print_col(dr, "orig_destination_distance")
     #print_col(dr, "srch_destination_id")
-    #print_col(dr, "srch_destination_type_id")
+    print_col(dr, "srch_destination_type_id")
     #print_col(dr, "hotel_continent")
     #print_col(dr, "hotel_country")
     print_col(dr, "hotel_market")
@@ -693,10 +829,87 @@ def test_DataReader(max=5, min=0):
     #print again.
     print_col(dr, "hotel_market")
 
+# test : timestamp
+def test_timestamp():
     # test - timestamp conversion
     t1 = "2014-02-27 17:44:32"
     t2 = DTR(DT(t1))
     print(t1 + ' == ' + str(t2))
+
+# test : matrix-stack (to read/write matrix from/into files)
+def test_matstack():
+    print("============================ : test_matstack()")
+    fact = DataFactory.load()
+    print("---------------------------- : train")
+    train = fact.get('train')
+    print(train.header())
+    print("---------------------------- : destination")
+    dest = fact.get('destination')
+    print(dest.header())
+
+    #! step1. build-up lookuptable for destination.
+    dest.build_map()
+
+    # transform the input date to array [msec, week, holiday?]
+    # @arg dmsec date-second since EPOCH (see DT() function)
+    def trans_date(dsec, isSeason = False):
+        ret = []
+        d = DTR(dsec)
+        #weekday : Monday is 0 and Sunday is 6
+        HOLIDAY = [0,0,0,0,0.5,1,1]
+        SEASON = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
+        SEASON_KEY = [0,0,1,1,1,2,2,2,3,3,3,0]      # season key by month.
+        #ret.extend([d.year, d.month, d.day, d.weekday(), HOLIDAY[d.weekday()], d.hour])
+        ret += [d.year, HOLIDAY[d.weekday()]]
+        if isSeason:
+            ret += SEASON[SEASON_KEY[d.month-1]]
+        return ret
+
+    def diff_date(co, ci):
+        dx = [(co - ci)/(60*60*24)]
+        #if True: print(str(DTR(co))+" - "+str(DTR(ci))+" = "+str(dx))
+        return dx
+
+    # transform each row of train/test data to single array.
+    def trans_train_row(i, R, train):
+        row = []
+        row = [i]           #for test in order to track row number.
+        # date-time (only save the 1st click-date, and difference from now)
+        row += trans_date(R[train.date_time]) + trans_date(R[train.srch_ci], True) # + trans_date(R[train.srch_co], True)
+        row += diff_date(R[train.srch_ci], R[train.date_time])     # ci - time (in day)
+        row += diff_date(R[train.srch_co], R[train.srch_ci])      # co - ci (in day)
+        # count
+        row += [R[train.channel], R[train.is_mobile], R[train.is_package]]
+        row += [R[train.srch_adults_cnt], R[train.srch_children_cnt], R[train.srch_rm_cnt]]
+        # locations
+        row += [R[train.posa_continent], R[train.user_location_country], R[train.user_location_region], R[train.user_location_city]]
+        row += [R[train.srch_destination_type_id], R[train.hotel_continent], R[train.hotel_country], R[train.hotel_market]]
+        dest_row = dest.lookup(R[train.srch_destination_id])
+        #TODO:XENI - dest_row can be None, for now ignore this case (TODO IMPROVE)
+        if dest_row is None:
+            return None
+        return row
+
+    mstack = MatrixStack()
+
+    #test-case : enumerate each set.
+    for i,R in enumerate(train._matrix):
+        row = trans_train_row(i, R, train)
+        if row is None: continue
+        mstack.push(row, np.int32)
+        print(str(DTR(R[train.date_time]))+':'+str(row))
+
+    mstack.test()
+    mstack.save_to_file()
+    mstack.reset()
+    mstack.test()
+    mstack.load_from_file()
+    mstack.test()
+    m2 = mstack.get(6)
+    print('---------: mstack.get(6)')
+    print(m2)
+    count = mstack.count()
+    print('count='+str(count))
 
 # test : factory
 def test_Factory():
@@ -712,7 +925,7 @@ def test_Factory():
     train = fact.get('train')
     print("---------------------------- : train")
     print(train.header())
-    #print_col(train, 'hotel_cluster')
+    print_col(train, 'hotel_cluster')
     #print_col(train, 'srch_destination_id')
     #print_col(train, 'channel')
 
@@ -738,56 +951,6 @@ def test_Factory():
             print('- WARN! not found dest_id:%d'%(i))
 
 
-    # transform the input date to array [msec, week, holiday?]
-    # @arg dmsec date-second since EPOCH (see DT() function)
-    def trans_date(dsec, isSeason = False):
-        ret = []
-        d = DTR(dsec)
-        #weekday : Monday is 0 and Sunday is 6
-        HOLIDAY = [0,0,0,0,0.5,1,1]
-        SEASON = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
-        SEASON_KEY = [0,0,1,1,1,2,2,2,3,3,3,0]
-        #ret.extend([d.year, d.month, d.day, d.weekday(), HOLIDAY[d.weekday()], d.hour])
-        ret += [d.year, HOLIDAY[d.weekday()]]
-        if isSeason:
-            ret += SEASON[SEASON_KEY[d.month-1]]
-        return ret
-
-    def diff_date(co, ci):
-        dx = [(co - ci)/(60*60*24)]
-        #if True: print(str(DTR(co))+" - "+str(DTR(ci))+" = "+str(dx))
-        return dx
-
-    # transform each row of train/test data to single array.
-    def trans_train_row(i, R, train):
-        row = []    #row = [i]
-        # date-time (only save the 1st click-date, and difference from now)
-        row += trans_date(R[train.date_time]) + trans_date(R[train.srch_ci], True) # + trans_date(R[train.srch_co], True)
-        row += diff_date(R[train.srch_ci], R[train.date_time])     # ci - time (in day)
-        row += diff_date(R[train.srch_co], R[train.srch_ci])      # co - ci (in day)
-        # count
-        row += [R[train.channel], R[train.is_mobile], R[train.is_package]]
-        row += [R[train.srch_adults_cnt], R[train.srch_children_cnt], R[train.srch_rm_cnt]]
-        # locations
-        row += [R[train.posa_continent], R[train.user_location_country], R[train.user_location_region], R[train.user_location_city]]
-        row += [R[train.srch_destination_type_id], R[train.hotel_continent], R[train.hotel_country], R[train.hotel_market]]
-        row += dest.lookup(R[train.srch_destination_id])
-        return row
-
-    mstack = MatrixStack()
-
-    for i,R in enumerate(train._matrix[0:100]):
-        row = trans_train_row(i, R, train)
-        mstack.push(row, np.int32)
-        print(str(DTR(R[train.date_time]))+':'+str(row))
-
-    mstack.test()
-    # mstack.save_to_file()
-    # mstack.reset()
-    # mstack.test()
-    # mstack.load_from_file()
-    # mstack.test()
-    # m2 = mstack.get(6)
     # print('-------- m2')
     # print(m2)
 
