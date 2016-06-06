@@ -22,20 +22,23 @@ def do_load_file(reload=False):
     fact = DataFactory.load(reload)
     print(fact)
 
-    print("---------------------------- : destination")
     dest = fact.get('destination')
-    print(dest.header())
-    print('> count=%d'%(dest.count()))
+    if dest is not None:
+        print("---------------------------- : destination")
+        print(dest.header())
+        print('> count=%d'%(dest.count()))
 
-    print("---------------------------- : train")
     train = fact.get('train')
-    print(train.header())
-    print('> train=%d'%(dest.count()))
+    if train is not None:
+        print("---------------------------- : train")
+        print(train.header())
+        print('> train=%d'%(dest.count()))
 
-    print("---------------------------- : test")
     test = fact.get('test')
-    print(test.header())
-    print('> test=%d'%(dest.count()))
+    if test is not None:
+        print("---------------------------- : test")
+        print(test.header())
+        print('> test=%d'%(dest.count()))
 
     #! step1. build-up lookuptable for destination.
     dest.build_map()
