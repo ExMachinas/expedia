@@ -3,7 +3,7 @@
 #
 import unittest
 import gzip, csv, io
-import dateutil.parser as dp
+#import dateutil.parser as dp
 import numpy as np          # for matrix handling.
 from datetime import datetime, timedelta
 
@@ -17,10 +17,22 @@ class GzCsvReader:
         self._gzfile = io.BufferedReader(gzip.open(self._gzname, "r"))
         self._reader = csv.reader(io.TextIOWrapper(self._gzfile, newline=""))
         self._header = self._reader.next()        # header information.
+        self.build_header_map()
 
     # header()
     def header(self):
         return self._header
+
+    # make column map index.
+    def build_header_map(self):
+        #class ColInd( object ):
+        #    pass
+        #ret = ColInd()
+        ret = self
+        for i, name in enumerate(self._header):
+            #print('> %s=%d'%(name, i))
+            setattr(ret, name, i)
+        return ret
 
     # next
     def next(self):
@@ -44,9 +56,9 @@ B = lambda x:1 if int(x) != 0 else 0            # boolean
 I = lambda x:int(x) if x != '' else 0           # integer
 F = lambda x:float(x) if x != '' else 0         # float
 S = lambda x:x                                  # string
-D = lambda x:dp.parse(x + ' 12:00:00')          # date (yyyy-MM-dd)
+#D = lambda x:dp.parse(x + ' 12:00:00')          # date (yyyy-MM-dd)
 T = lambda x:x                                  # time (hh:mm:ss)
-DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss) !WARN! EASY BUT TOO SLOW FUNCTION.
+#DT = lambda x:dp.parse(x)                       # date-time (yyyy-MM-dd hh:mm:ss) !WARN! EASY BUT TOO SLOW FUNCTION.
 
 #------------------------------
 # IMPROVE DATETIME PARSER.
@@ -55,13 +67,13 @@ Dt = lambda x: [int(i) for i in x.split(':')]    # time (hh:mm:ss)
 
 EPOCH = datetime(1970, 1, 1) # use POSIX epoch
 
-def DT(x):
+def DT(x):            # DT Datetime parser to seconds since EPOCH
     if x=='': return 0
     try:
         y = x.split(' ')
         d,t = [Dd(y[0]), Dt(y[1])]
         t0 = datetime(d[0], d[1], d[2], t[0], t[1], t[2])
-        td = (t0 - EPOCH)
+        td = (t0 - EPOCH)           # timedelta
         return td.total_seconds()
     except:
         return -1                               # -1 means invalid-time-data.
@@ -70,7 +82,111 @@ def D(x):
     if x == '': return 0
     return DT(x + ' 12:00:00')
 
+def DTR(timestamp):             # DT Reverse from second to Datetme.
+    utc_time = EPOCH + timedelta(seconds=int(timestamp))
+    return utc_time
+
 MAX_ROW = -1                                     # maximum number of row to be read from csv (-1 means the unlimited)
+
+##############################
+# class: MatrixStack
+# - to handle large size of matrix in stack for cut/merge
+MATSTACK_GRP_SIZE = 10
+class MatrixStack():
+    def __init__(self):
+        self._matrix = []              # to save group of matrix in array.
+        self._matrix_256 = None
+        self._count = 0                # number of rows in matrix.
+
+    # push single array ..........................................
+    def push(self, list, dtype=np.float32):
+        np_list = np.array(list, dtype)
+
+        # stack-up into matrix_255
+        if self._matrix_256 is None:
+            self._matrix_256 = np_list
+        else:
+            self._matrix_256 = np.vstack((self._matrix_256, np_list))
+
+        # increase count
+        self._count += 1
+
+        # check if
+        if self._count%MATSTACK_GRP_SIZE == 0:        # matrix_256 must be full.
+            self.pack()
+
+    # the count of array in _matrix (# of group of 256 matrix)
+    def count(self):
+        return self._count/MATSTACK_GRP_SIZE
+
+    # get np.array() matrix from to .............................
+    def get(self, start, end=None):
+        max = self.count()
+        end = max if end is None else end
+        matrix = None
+        for i in range(start, end):
+            m = self._matrix[i] if i < max else None
+            if m is None:
+                break
+            if matrix is None:
+                matrix = m
+            else:
+                matrix = np.vstack((matrix, m))
+        return matrix
+
+    # clear buffer...............................................
+    def reset(self):
+        self._matrix = []
+        self._matrix_256 = None
+        self._count = 0
+
+    # pack _matrix_256 into _matrix..............................
+    def pack(self):
+        if self._matrix_256 is not None:
+            self._matrix.append(self._matrix_256)
+            self._matrix_256 = None
+
+    # save matrix into file......................................
+    def save_to_file(self, filename=None):
+        filename = filename if filename else "matrix-stack.dat"
+        self.pack()
+        if self._matrix is not None:
+            from six.moves import cPickle
+            f = open(filename, 'wb')
+            cPickle.dump((self._count, self._matrix), f, protocol=cPickle.HIGHEST_PROTOCOL)
+            f.close()
+        print('matrix-stack: saved to file :'+filename+', count='+str(self._count))
+        return filename
+
+    # load matrix object from file...............................
+    def load_from_file(self, filename=None):
+        import os.path
+        filename = filename if filename else "matrix-stack.dat"
+        self.reset()
+        matrix = None
+        count = 0
+        if os.path.isfile(filename):
+            from six.moves import cPickle
+            f = open(filename, 'rb')
+            (count, matrix) = cPickle.load(f)
+            f.close()
+        if matrix is not None:
+            self._count = count
+            self._matrix = matrix
+        print('matrix-stack: loaded from file :'+filename+", count="+str(count))
+        return filename
+
+    # test data itself ..........................................
+    def test(self):
+        cnt = lambda x: len(x) if x is not None else 0
+        print('count=%d, matrix.size=%d, mat256.size=%d '%(self._count, cnt(self._matrix), cnt(self._matrix_256)))
+        for m in self._matrix:
+            print('---------')
+            print(m[0:10,0:8])
+        if self._matrix_256 is not None:
+            print('=========')
+            print(self._matrix_256[0:2,0:8])
+
 
 
 ##############################
@@ -290,6 +406,13 @@ class DataSheet(GzCsvReader):
         except:
             return np.array([])
 
+    # find-out all value for row
+    def rows(self, line):
+        try:
+            return self._matrix[line]
+        except:
+            return np.array([])
+
     # save matrix to file
     def save_to_file(self, filename=None):
         filename = filename if filename else (self._filename + ".dat")
@@ -370,6 +493,7 @@ class SubmissionSheet(DataSheet):
 class DestinationSheet(DataSheet):
     def __init__(self):
         DataSheet.__init__(self, "destinations.csv.gz")
+        self._map = None
 
     #! override def_filter()
     def def_filter(self, col, name):
@@ -380,6 +504,23 @@ class DestinationSheet(DataSheet):
             return LUT[name]
         except:
             return (lambda x:float(x)) if 1>0 else (lambda x:x)
+
+    #! build internal map from array.
+    def build_map(self, rebuild = False):
+        if ((not rebuild) and self._map is not None):
+            return self._map
+        map_dest = {}
+        for m in self._matrix:
+            map_dest[m[0]] = m.tolist()
+
+        self._map = None if len(map_dest) < 1 else map_dest
+
+    #! lookup dest_id from map
+    def lookup(self, dest_id):
+        try:
+            return self._map[dest_id]
+        except:
+            return None
 
 
 ##############################
@@ -444,16 +585,20 @@ class DataFactory():
 
     def init_sheets(self):
         map = {}
-        #map['submission'] = SubmissionSheet()
-        #map['destination'] = DestinationSheet()
+        map['submission'] = SubmissionSheet()
+        map['destination'] = DestinationSheet()
         map['test'] = TestSheet()
-        #map['train'] = TrainSheet()
-        self._map = map;
+        map['train'] = TrainSheet()
+        self._map = map
 
         for k,o in map.iteritems():
             print("--------------------------------")
             print("Loading: "+str(k)+" -> "+str(o))
             o.load_auto()
+
+    # get DataReader instance for the given name
+    def get(self, name):
+        return self._map[name]
 
     #@staticmethod
     @classmethod
@@ -464,6 +609,7 @@ class DataFactory():
         return cls.instance
 
 
+
 ##############################
 # Unit Test Class.
 class TestReader(unittest.TestCase):
@@ -472,9 +618,27 @@ class TestReader(unittest.TestCase):
         test_DataReader()
         test_Factory()
 
+#print (dr._matrix)
+def print_col(dd, name):
+    from itertools import groupby
+    print ("--- " + name)
+    cols = dd.cols(name)
+    print ('Count:'+str(cols.size))
+    print (cols)
+    if cols.size < 1:
+        print (">WARN! - empty ");
+        return
+    cols.sort()
+    grps = ((k, len(list(g))) for k, g in groupby(cols))            # grouping
+    index = np.fromiter(grps, dtype='a8,u2')                        # a8 string len=8
+    print ("> count="+str(index.shape[0])+", min="+str(cols.min())+", max="+str(cols.max())+" --- ")
+    #print (cols)
+    print (index)
+    # group : see http://stackoverflow.com/questions/4651683/numpy-grouping-using-itertools-groupby-performance
 
 ##############################
 # Unit Test Function.
+# - test populate() and load() function
 def test_DataReader(max=5, min=0):
     gzfile="sample_submission.csv.gz"
     print ("hello test DataReader --- ")
@@ -482,8 +646,8 @@ def test_DataReader(max=5, min=0):
     #dr = DataSheet(gzfile)
     #dr = SubmissionSheet()
     #dr = DestinationSheet()
-    dr = TestSheet()
-    #dr = TrainSheet()
+    #dr = TestSheet()
+    dr = TrainSheet()
 
     # print header first
     print(dr.header())
@@ -499,24 +663,6 @@ def test_DataReader(max=5, min=0):
 
     #! use load_auto()
     #dr.populate()
-
-    #print (dr._matrix)
-    def print_col(dd, name):
-        from itertools import groupby
-        print ("--- " + name)
-        cols = dd.cols(name)
-        print ('Count:'+str(cols.size))
-        print (cols)
-        if cols.size < 1:
-            print (">WARN! - empty ");
-            return
-        cols.sort()
-        grps = ((k, len(list(g))) for k, g in groupby(cols))            # grouping
-        index = np.fromiter(grps, dtype='a8,u2')                        # a8 string len=8
-        print ("> count="+str(index.shape[0])+", min="+str(cols.min())+", max="+str(cols.max())+" --- ")
-        #print (cols)
-        print (index)
-        # group : see http://stackoverflow.com/questions/4651683/numpy-grouping-using-itertools-groupby-performance
 
     #print_col(dr, "hotel_cluster")
     #print_col(dr, "site_name")
@@ -541,17 +687,109 @@ def test_DataReader(max=5, min=0):
     print_col(dr, "hotel_market")
 
     #ok! auto-load preliminary data (which was converted from original gz file, then saved back to file)
-    dr.load_auto(True)
+    #dr.load_auto(True)
+    dr.load_auto()
 
     #print again.
     print_col(dr, "hotel_market")
 
+    # test - timestamp conversion
+    t1 = "2014-02-27 17:44:32"
+    t2 = DTR(DT(t1))
+    print(t1 + ' == ' + str(t2))
 
+# test : factory
 def test_Factory():
     fact = DataFactory.load()
     print(fact)
-    fact2 = DataFactory.load()
-    print(fact2)
+
+    dest = fact.get('destination')
+    print("---------------------------- : destination")
+    print(dest.header())
+    #print(dest.rows(10))
+    #print_col(dest, 'srch_destination_id')
+
+    train = fact.get('train')
+    print("---------------------------- : train")
+    print(train.header())
+    #print_col(train, 'hotel_cluster')
+    #print_col(train, 'srch_destination_id')
+    #print_col(train, 'channel')
+
+    test = fact.get('test')
+    print("---------------------------- : test")
+    print(test.header())
+    #print_col(test, 'hotel_cluster')
+    #print_col(test, 'srch_destination_id')
+
+    #! step1. build-up lookuptable for destination.
+    dest.build_map()
+
+    print('index of d142='+str(dest.d142))
+    print('index of train.srch_destination_id='+str(train.srch_destination_id))
+    print('index of test.date_time='+str(test.date_time))
+    print('index of train.user_location_country='+str(train.user_location_country))
+
+    srch_destination_id = train.cols('srch_destination_id')
+    for i in srch_destination_id[10:20]:
+        #print('search[id: %d]'%(i))
+        d = dest.lookup(i)
+        if d is None:
+            print('- WARN! not found dest_id:%d'%(i))
+
+
+    # transform the input date to array [msec, week, holiday?]
+    # @arg dmsec date-second since EPOCH (see DT() function)
+    def trans_date(dsec, isSeason = False):
+        ret = []
+        d = DTR(dsec)
+        #weekday : Monday is 0 and Sunday is 6
+        HOLIDAY = [0,0,0,0,0.5,1,1]
+        SEASON = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
+        SEASON_KEY = [0,0,1,1,1,2,2,2,3,3,3,0]
+        #ret.extend([d.year, d.month, d.day, d.weekday(), HOLIDAY[d.weekday()], d.hour])
+        ret += [d.year, HOLIDAY[d.weekday()]]
+        if isSeason:
+            ret += SEASON[SEASON_KEY[d.month-1]]
+        return ret
+
+    def diff_date(co, ci):
+        dx = [(co - ci)/(60*60*24)]
+        #if True: print(str(DTR(co))+" - "+str(DTR(ci))+" = "+str(dx))
+        return dx
+
+    # transform each row of train/test data to single array.
+    def trans_train_row(i, R, train):
+        row = []    #row = [i]
+        # date-time (only save the 1st click-date, and difference from now)
+        row += trans_date(R[train.date_time]) + trans_date(R[train.srch_ci], True) # + trans_date(R[train.srch_co], True)
+        row += diff_date(R[train.srch_ci], R[train.date_time])     # ci - time (in day)
+        row += diff_date(R[train.srch_co], R[train.srch_ci])      # co - ci (in day)
+        # count
+        row += [R[train.channel], R[train.is_mobile], R[train.is_package]]
+        row += [R[train.srch_adults_cnt], R[train.srch_children_cnt], R[train.srch_rm_cnt]]
+        # locations
+        row += [R[train.posa_continent], R[train.user_location_country], R[train.user_location_region], R[train.user_location_city]]
+        row += [R[train.srch_destination_type_id], R[train.hotel_continent], R[train.hotel_country], R[train.hotel_market]]
+        row += dest.lookup(R[train.srch_destination_id])
+        return row
+
+    mstack = MatrixStack()
+
+    for i,R in enumerate(train._matrix[0:100]):
+        row = trans_train_row(i, R, train)
+        mstack.push(row, np.int32)
+        print(str(DTR(R[train.date_time]))+':'+str(row))
+
+    mstack.test()
+    # mstack.save_to_file()
+    # mstack.reset()
+    # mstack.test()
+    # mstack.load_from_file()
+    # mstack.test()
+    # m2 = mstack.get(6)
+    # print('-------- m2')
+    # print(m2)
 
 ##############################
 # Self Test Main.
