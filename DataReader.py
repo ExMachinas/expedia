@@ -453,10 +453,8 @@ class DataSheet(GzCsvReader):
             matrix = None
 
         # merge all temp-file to single
-        matrix = merge_split_to_matrix(self, next_id)
+        merge_split_to_matrix(self, next_id)
 
-        # save back into member matrix.
-        self._matrix = matrix
         return True
 
     # find-out all value for column
