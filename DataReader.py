@@ -90,6 +90,7 @@ MAX_ROW = -1                                     # maximum number of row to be r
 
 #------------------------------
 # time-usage print
+# WARN! DO NOT USE RETURN VALUE IF @time_usage() used.
 import time
 def time_usage(func):
     def wrapper(*args, **kwargs):
@@ -104,9 +105,9 @@ def time_usage(func):
 # - to handle large size of matrix in stack for cut/merge
 MATSTACK_GRP_SIZE = 10              # 255
 class MatrixStack():
-    def __init__(self, name = None):
+    def __init__(self, name = "def"):
         self._name = name              # used in file saving.
-        self._matrix = []              # to save group of matrix in array.
+        self._matrix_list = []              # to save group of matrix in array.
         self._matrix_256 = None
         self._count = 0                # number of rows in matrix.
 
@@ -137,7 +138,7 @@ class MatrixStack():
         end = max if end is None else end
         matrix = None
         for i in range(start, end):
-            m = self._matrix[i] if i < max else None
+            m = self._matrix_list[i] if i < max else None
             if m is None:
                 break
             if matrix is None:
@@ -148,20 +149,20 @@ class MatrixStack():
 
     # clear buffer...............................................
     def reset(self):
-        self._matrix = []
+        self._matrix_list = []
         self._matrix_256 = None
         self._count = 0
 
     # pack _matrix_256 into _matrix..............................
     def pack(self):
         if self._matrix_256 is not None:
-            self._matrix.append(self._matrix_256)
+            self._matrix_list.append(self._matrix_256)
             self._matrix_256 = None
 
     # get filename from given name
     def as_filename(self, name = None):
         name = name if name else self._name
-        name = name if name else "def"
+        #name = name if name else "def"
         filename = "data/mstack-"+name+".dat"
         return filename
 
@@ -170,10 +171,10 @@ class MatrixStack():
     def save_to_file(self, name=None):
         filename = self.as_filename(name)
         self.pack()
-        if self._matrix is not None:
+        if self._matrix_list is not None:
             from six.moves import cPickle
             f = open(filename, 'wb')
-            cPickle.dump((self._count, self._matrix), f, protocol=cPickle.HIGHEST_PROTOCOL)
+            cPickle.dump((self._count, self._matrix_list), f, protocol=cPickle.HIGHEST_PROTOCOL)
             f.close()
             print('matrix-stack: saved to file :'+filename+', count='+str(self._count))
             return True
@@ -201,21 +202,28 @@ class MatrixStack():
         # check if data loaded.
         if matrix is not None:
             self._count = count
-            self._matrix = matrix
+            self._matrix_list = matrix
             print('matrix-stack: loaded from file :'+filename+", count="+str(count))
             return True
         else:
             return False
+
+    # matrix merge into single one...............................
+    def merge_one(self):
+        ret = np.vstack(self._matrix_list)
+        #ret = self._matrix_list[0]
+        #ret = np.vstack((ret, self._matrix_list[1]))
+        return ret
 
     # test data itself ..........................................
     @time_usage
     def test(self, print_deep=False):
         # print current matrix status.
         cnt = lambda x: len(x) if x is not None else 0
-        print('mstack[%s] count=%d, matrix.size=%d, mat256.size=%d '%(self._name, self._count, cnt(self._matrix), cnt(self._matrix_256)))
+        print('mstack[%s] count=%d, matrix.size=%d, mat256.size=%d ' % (self._name, self._count, cnt(self._matrix_list), cnt(self._matrix_256)))
         if print_deep:
-            for i,m in enumerate(self._matrix):
-                print('--------- : [%d/%d]'%(i, cnt(self._matrix)))
+            for i,m in enumerate(self._matrix_list):
+                print('--------- : [%d/%d]' % (i, cnt(self._matrix_list)))
                 print(m[0:10,0:9])
             if self._matrix_256 is not None:
                 print('--------- : [last]')
@@ -356,21 +364,21 @@ class DataSheet(GzCsvReader):
         @time_usage
         def merge_split_to_matrix(thiz, max):
             #- rebuild whole matrix from temp-file.
-            matrix = None
+            matrix_list = []
             for fid in range(0, max):
                 filename = "data/%s-%04d"%(thiz._filename, fid)
                 is_file = os.path.isfile(filename)
                 if not is_file: break
+                thiz._matrix = None
                 thiz.load_from_file(filename)
                 print("> [%d] loaded matrix.count = %d "%(fid, len(thiz._matrix)))
-                if matrix is None:
-                    matrix = thiz._matrix
-                else:
-                    matrix = np.vstack((matrix, thiz._matrix))               # array push input matrix
+                if thiz._matrix is not None:
+                    matrix_list.append(thiz._matrix)
 
+            matrix = np.vstack(matrix_list)               # array push input matrix
             print(">> Total matrix Count = %d"%(len(matrix)))
             thiz._matrix = matrix
-            return matrix
+            return True
 
         # check if the temp-file exists already.
         if not force_build:
@@ -383,40 +391,38 @@ class DataSheet(GzCsvReader):
 
         ############
         # Build temp files.
-        RCOUNT = 256
-        PACK_ROW = RCOUNT*1024*4        # 4k * 256 = 1M
+        RCOUNT = 256*4
+        PACK_ROW = RCOUNT*1024            # 4k * 256  = 1M
+        #PACK_ROW = RCOUNT*16             #TODO:XENI - for test.
 
         # read rows
         def read_rows(count):
             mat = None
+            rows = []
             for i in range(0, count):
                 row = self.next()
                 row = np.array(row, dtype=np.float32)   # convert to float
                 if row.size < 1: break;     # it must be EOL
-                if mat is None:
-                    mat = row
-                else:
-                    mat = np.vstack((mat, row))
+                rows.append(row)
+            if len(rows) < 1:
+                return None
+            mat = np.vstack(rows)
             return mat
 
         # enumerate all rows.
-        matrix = None
+        matrix_list = []
         next_id = 0
         i = 0
         while(True):
-            rows = read_rows(RCOUNT)
-            if rows is None: break          # must be EOL
+            mat = read_rows(RCOUNT)
+            if mat is None: break          # must be EOL
 
             # increase row number
-            i += rows.shape[0]
+            i += mat.shape[0]
 
             # check max-row.
             if(MAX_ROW > 0 and i >= MAX_ROW):
-                # init or push next-list
-                if matrix is None:
-                    matrix = rows
-                else:
-                    matrix = np.vstack((matrix, rows))               # array push
+                matrix_list.append(mat)                 # array push
                 break
 
             # print status every 1k
@@ -425,6 +431,9 @@ class DataSheet(GzCsvReader):
 
             # do every 1M lines
             if i%PACK_ROW == 0:
+                # add into list and clear current.
+                matrix = np.vstack(matrix_list)
+                matrix_list = []
                 if matrix is not None:
                     #save to temp file.
                     filename = "data/%s-%04d"%(self._filename, next_id)
@@ -432,25 +441,22 @@ class DataSheet(GzCsvReader):
                     self.save_to_file(filename)
                     next_id = next_id + 1
                     matrix = None
-                # save current-list to matrix
-                matrix = rows
-                # next-loop
-                continue
 
             # init or push next-list
-            if matrix is None:
-                matrix = rows
-            else:
-                matrix = np.vstack((matrix, rows))               # array push
+            matrix_list.append(mat)                 # array push
 
         # for the remained data.
-        if matrix is not None:
-            #save to temp file.
-            filename = "data/%s-%04d"%(self._filename, next_id)
-            self._matrix = matrix
-            self.save_to_file(filename)
-            next_id = next_id + 1
-            matrix = None
+        if len(matrix_list) > 0:
+            # add into list and clear current.
+            matrix = np.vstack(matrix_list)
+            matrix_list = []
+            if matrix is not None:
+                #save to temp file.
+                filename = "data/%s-%04d"%(self._filename, next_id)
+                self._matrix = matrix
+                self.save_to_file(filename)
+                next_id = next_id + 1
+                matrix = None
 
         # merge all temp-file to single
         merge_split_to_matrix(self, next_id)
@@ -576,6 +582,7 @@ class DestinationSheet(DataSheet):
 
     #! build internal map from array.
     def build_map(self, rebuild = False):
+        print("Destination.build_map(rebuild=%s)...."%("True" if rebuild else "False"))
         if ((not rebuild) and self._map is not None):
             return self._map
         map_dest = {}
@@ -664,8 +671,8 @@ class DataFactory():
         #TODO:XENI - not yet use submission
         #map['submission'] = SubmissionSheet()
         map['destination'] = DestinationSheet()
-        map['test'] = TestSheet()
         map['train'] = TrainSheet()
+        #map['test'] = TestSheet()
         self._map = map
 
         for k,o in map.iteritems():
@@ -927,7 +934,7 @@ def test_matstack():
         row = trans_train_row(i, R, train)
         if row is None: continue
         mstack.push(row, np.int32)
-        print(str(DTR(R[train.date_time]))+':'+str(row))
+        #print(str(DTR(R[train.date_time]))+':'+str(row))
 
     mstack.test()
     mstack.save_to_file()
@@ -940,6 +947,8 @@ def test_matstack():
     print(m2)
     count = mstack.count()
     print('count='+str(count))
+    matrix = mstack.merge_one()
+    print('maxtrix.count='+str(len(matrix)))
 
 # test : factory
 def test_Factory():
