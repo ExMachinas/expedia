@@ -478,14 +478,17 @@ class DataSheet(GzCsvReader):
     def save_to_file(self, filename=None):
         filename = filename if filename else (self._filename + ".dat")
         matrix = self._matrix if hasattr(self, '_matrix') else None
-        #! by using cPickle
-        if matrix is not None:
-            from six.moves import cPickle
-            f = open(filename, 'wb')
-            cPickle.dump(matrix, f, protocol=cPickle.HIGHEST_PROTOCOL)
-            f.close()
-        print('> saved to file :'+filename)
-        #end of cPickle
+        try:
+            #! by using cPickle
+            if matrix is not None:
+                from six.moves import cPickle
+                f = open(filename, 'wb')
+                cPickle.dump(matrix, f, protocol=cPickle.HIGHEST_PROTOCOL)
+                f.close()
+            print('> saved to file :'+filename)
+            #end of cPickle
+        except:
+            print('WARN! failed to save to file :'+filename)
         return filename
 
     # load matrix object from file.
