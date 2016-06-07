@@ -103,23 +103,25 @@ def time_usage(func):
 ##############################
 # class: MatrixStack
 # - to handle large size of matrix in stack for cut/merge
-MATSTACK_GRP_SIZE = 10              # 255
+MATSTACK_GRP_SIZE = 100              # 255
 class MatrixStack():
     def __init__(self, name = "def"):
         self._name = name              # used in file saving.
-        self._matrix_list = []              # to save group of matrix in array.
-        self._matrix_256 = None
+        self._matrix = None            # one-single large matrix (it will merged one with merge_one() call)
+        self._matrix_y = None
+        self._matrix_list = []         # to save group of matrix in array.
+        self._matrix_list_y = []       # to save group of matrix-y in array.
+        self._grp_list = []            # sub-group
+        self._grp_list_y = []          # sub-group with Y.
         self._count = 0                # number of rows in matrix.
 
     # push single array ..........................................
-    def push(self, list, dtype=np.float32):
-        np_list = np.array(list, dtype)
+    def push(self, row, row_y, dtype=np.float32):
+        np_row = np.array(row, dtype)
+        row_y = int(row_y)
 
-        # stack-up into matrix_255
-        if self._matrix_256 is None:
-            self._matrix_256 = np_list
-        else:
-            self._matrix_256 = np.vstack((self._matrix_256, np_list))
+        self._grp_list.append(np_row)
+        self._grp_list_y.append(row_y)
 
         # increase count
         self._count += 1
@@ -135,29 +137,39 @@ class MatrixStack():
     # get np.array() matrix from to .............................
     def get(self, start, end=None):
         max = self.count()
-        end = max if end is None else end
-        matrix = None
+        end = start+1 if end is None else end
+        end = max if end < 0 else end
+        list = []
+        list_y = []
         for i in range(start, end):
-            m = self._matrix_list[i] if i < max else None
+            (m, m_y) = (self._matrix_list[i], self._matrix_list_y[i]) if i < max else None
             if m is None:
                 break
-            if matrix is None:
-                matrix = m
-            else:
-                matrix = np.vstack((matrix, m))
-        return matrix
+            list.append(m)
+            list_y.append(m_y)
+
+        matrix = np.vstack(list)
+        matrix_y = np.concatenate(list_y)
+        return (matrix, matrix_y)
 
     # clear buffer...............................................
     def reset(self):
+        self._matrix = None
+        self._matrix_y = None
         self._matrix_list = []
-        self._matrix_256 = None
+        self._matrix_list_y = []
+        self._grp_list = []
+        self._grp_list_y = []
         self._count = 0
 
     # pack _matrix_256 into _matrix..............................
     def pack(self):
-        if self._matrix_256 is not None:
-            self._matrix_list.append(self._matrix_256)
-            self._matrix_256 = None
+        if len(self._grp_list) > 0:
+            (mat, mat_y) = (np.vstack(self._grp_list),self._grp_list_y)
+            self._matrix_list.append(mat)
+            self._matrix_list_y.append(mat_y)
+            self._grp_list = []
+            self._grp_list_y = []
 
     # get filename from given name
     def as_filename(self, name = None):
@@ -169,14 +181,16 @@ class MatrixStack():
     # save matrix into file......................................
     # @return True if saved
     def save_to_file(self, name=None):
-        print("mstack.save_to_file(%s)...."%(name))
         filename = self.as_filename(name)
+        print("mstack.save_to_file(%s)...."%(filename))
         self.pack()
         if self._matrix_list is not None:
             from six.moves import cPickle
             f = open(filename, 'wb')
-            cPickle.dump((self._count, self._matrix_list), f, protocol=cPickle.HIGHEST_PROTOCOL)
-            f.close()
+            try:
+                cPickle.dump((self._count, self._matrix_list, self._matrix_list_y), f, protocol=cPickle.HIGHEST_PROTOCOL)
+            finally:
+                f.close()
             print('matrix-stack: saved to file :'+filename+', count='+str(self._count))
             return True
         else:
@@ -185,19 +199,22 @@ class MatrixStack():
     # load matrix object from file...............................
     # @return True if load (and file exists)
     def load_from_file(self, name=None):
-        print("mstack.load_from_file(%s)...."%(name))
         import os.path
         filename = self.as_filename(name)
+        print("mstack.load_from_file(%s)...."%(filename))
         self.reset()
         matrix = None
+        matrix_y = None
         count = 0
 
         # check if file exists.
         if os.path.isfile(filename):
             from six.moves import cPickle
             f = open(filename, 'rb')
-            (count, matrix) = cPickle.load(f)
-            f.close()
+            try:
+                (count, matrix, matrix_y) = cPickle.load(f)
+            finally:
+                f.close()
         else:
             return False
 
@@ -205,6 +222,7 @@ class MatrixStack():
         if matrix is not None:
             self._count = count
             self._matrix_list = matrix
+            self._matrix_list_y = matrix_y
             print('matrix-stack: loaded from file :'+filename+", count="+str(count))
             return True
         else:
@@ -212,24 +230,28 @@ class MatrixStack():
 
     # matrix merge into single one...............................
     def merge_one(self):
-        ret = np.vstack(self._matrix_list)
-        #ret = self._matrix_list[0]
-        #ret = np.vstack((ret, self._matrix_list[1]))
-        return ret
+        if len(self._matrix_list) > 0:
+            (mat, mat_y) = (np.vstack(self._matrix_list), np.concatenate(self._matrix_list_y))
+            self.reset()
+            self._matrix = mat
+            self._matrix_y = mat_y
+        return (self._matrix, self._matrix_y)
 
     # test data itself ..........................................
     @time_usage
     def test(self, print_deep=False):
         # print current matrix status.
         cnt = lambda x: len(x) if x is not None else 0
-        print('mstack[%s] count=%d, matrix.size=%d, mat256.size=%d ' % (self._name, self._count, cnt(self._matrix_list), cnt(self._matrix_256)))
+        print('mstack[%s] count=%d, matrix_list.cnt=%d, grp_list.cnt=%d ' % (self._name, self._count, cnt(self._matrix_list), cnt(self._grp_list)))
         if print_deep:
             for i,m in enumerate(self._matrix_list):
                 print('--------- : [%d/%d]' % (i, cnt(self._matrix_list)))
                 print(m[0:10,0:9])
+                print(self._matrix_list_y[i][0:9])
             if self._matrix_256 is not None:
                 print('--------- : [last]')
-                print(self._matrix_256[0:10,0:9])
+                print(self._grp_list[0:10,0:9])
+                print(self._grp_list_y[0:9])
 
 
 ##############################
@@ -254,6 +276,10 @@ class DataSheet(GzCsvReader):
             return []
         else:
             return self.filter(list)
+
+    # clear this matrix buffer to release memory.
+    def reset(self):
+        self._matrix = None
 
     def filter(self, list):
         #out = [self.conv(x) for x in list]
@@ -596,12 +622,13 @@ class DestinationSheet(DataSheet):
     def build_map(self, rebuild = False):
         print("Destination.build_map(rebuild=%s)...."%("True" if rebuild else "False"))
         if ((not rebuild) and self._map is not None):
-            return self._map
+            return True
         map_dest = {}
         for m in self._matrix:
             map_dest[m[0]] = m.tolist()
 
         self._map = None if len(map_dest) < 1 else map_dest
+        return True if self._map is not None else False
 
     #! lookup dest_id from map
     def lookup(self, dest_id):
@@ -676,6 +703,7 @@ class DataFactory():
     def __init__(self, reload):
         print("make DataFactory()")
         self._reload = reload
+        self._map = None
         self.init_sheets()
 
     def init_sheets(self):
@@ -701,6 +729,14 @@ class DataFactory():
             return self._map[name]
         except:
             return None
+
+    # resert all members.
+    def reset_all(self):
+        if self._map is None: return
+        for k,o in self._map.iteritems():
+            print("--------------------------------")
+            print("Reset: "+str(k)+" -> "+str(o))
+            o.reset()
 
     #@staticmethod
     @classmethod
@@ -751,7 +787,7 @@ class TransTrain00(MatrixStack):
         # transform each row of train/test data to single array.
         def trans_train_row(i, R, train):
             row = []
-            row = [i]           #for test in order to track row number.
+            #row = [i]           #for test in order to track row number.
             # date-time (only save the 1st click-date, and difference from now)
             row += trans_date(R[train.date_time]) + trans_date(R[train.srch_ci], True) # + trans_date(R[train.srch_co], True)
             row += diff_date(R[train.srch_ci], R[train.date_time])     # ci - time (in day)
@@ -765,16 +801,18 @@ class TransTrain00(MatrixStack):
             dest_row = dest.lookup(R[train.srch_destination_id])
             #TODO:XENI - dest_row can be None, for now ignore this case (TODO IMPROVE)
             if dest_row is None:
-                return None
-            return row
+                return (None, None)
+            return (row, R[train.hotel_cluster])
 
         @time_usage
         def run_transform(mstack):
             #test-case : enumerate each set.
             for i,R in enumerate(train._matrix):
-                row = trans_train_row(i, R, train)
+                (row, row_y) = trans_train_row(i, R, train)
                 if row is None: continue
-                mstack.push(row, np.int32)
+                #if i > 1000: break   #TODO:XENI - for test
+                #mstack.push(row, row_y, np.int32)
+                mstack.push(row, row_y, np.float32)
                 #print(str(DTR(R[train.date_time]))+':'+str(row))
 
         # MatrixStack
@@ -902,54 +940,8 @@ def test_matstack():
     #! step1. build-up lookuptable for destination.
     dest.build_map()
 
-    # transform the input date to array [msec, week, holiday?]
-    # @arg dmsec date-second since EPOCH (see DT() function)
-    def trans_date(dsec, isSeason = False):
-        ret = []
-        d = DTR(dsec)
-        #weekday : Monday is 0 and Sunday is 6
-        HOLIDAY = [0,0,0,0,0.5,1,1]
-        SEASON = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
-        SEASON_KEY = [0,0,1,1,1,2,2,2,3,3,3,0]      # season key by month.
-        #ret.extend([d.year, d.month, d.day, d.weekday(), HOLIDAY[d.weekday()], d.hour])
-        ret += [d.year, HOLIDAY[d.weekday()]]
-        if isSeason:
-            ret += SEASON[SEASON_KEY[d.month-1]]
-        return ret
-
-    def diff_date(co, ci):
-        dx = [(co - ci)/(60*60*24)]
-        #if True: print(str(DTR(co))+" - "+str(DTR(ci))+" = "+str(dx))
-        return dx
-
-    # transform each row of train/test data to single array.
-    def trans_train_row(i, R, train):
-        row = []
-        row = [i]           #for test in order to track row number.
-        # date-time (only save the 1st click-date, and difference from now)
-        row += trans_date(R[train.date_time]) + trans_date(R[train.srch_ci], True) # + trans_date(R[train.srch_co], True)
-        row += diff_date(R[train.srch_ci], R[train.date_time])     # ci - time (in day)
-        row += diff_date(R[train.srch_co], R[train.srch_ci])      # co - ci (in day)
-        # count
-        row += [R[train.channel], R[train.is_mobile], R[train.is_package]]
-        row += [R[train.srch_adults_cnt], R[train.srch_children_cnt], R[train.srch_rm_cnt]]
-        # locations
-        row += [R[train.posa_continent], R[train.user_location_country], R[train.user_location_region], R[train.user_location_city]]
-        row += [R[train.srch_destination_type_id], R[train.hotel_continent], R[train.hotel_country], R[train.hotel_market]]
-        dest_row = dest.lookup(R[train.srch_destination_id])
-        #TODO:XENI - dest_row can be None, for now ignore this case (TODO IMPROVE)
-        if dest_row is None:
-            return None
-        return row
-
-    mstack = MatrixStack()
-
-    #test-case : enumerate each set.
-    for i,R in enumerate(train._matrix):
-        row = trans_train_row(i, R, train)
-        if row is None: continue
-        mstack.push(row, np.int32)
-        #print(str(DTR(R[train.date_time]))+':'+str(row))
+    mstack = TransTrain00()
+    mstack.transform()
 
     mstack.test()
     mstack.save_to_file()
@@ -957,13 +949,23 @@ def test_matstack():
     mstack.test()
     mstack.load_from_file()
     mstack.test()
-    m2 = mstack.get(6)
+
+
+    m2 = mstack.get(2)
     print('---------: mstack.get(6)')
     print(m2)
     count = mstack.count()
     print('count='+str(count))
     matrix = mstack.merge_one()
     print('maxtrix.count='+str(len(matrix)))
+
+    print('---------: train.get(6)')
+    t2 = train._matrix[20:30,20:]
+    print(t2.astype(dtype=np.int32))
+
+    (mx, my) = mstack.merge_one()
+    print('---------: train.merge_one(6)')
+    print(mx[20:30], my[20:30])
 
 # test : factory
 def test_Factory():

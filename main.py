@@ -10,12 +10,13 @@ from DataReader import MatrixStack
 def main():
     print("main()....")
 
-    print("======================================")
+    print("=====================================")
     print("Start: Data Conversion to Matrix file")
-    print("======================================")
-    do_load_file()             # load data.
+    print("=====================================")
+    #do_load_file()             # load data.
     #do_load_file(True)          # force to reload
-    do_transform_train()        # transform data.
+    #do_transform_train()        # transform data.
+    mstack = prepare_transform_train()
 
 # load data-files from cached file if possible.
 def do_load_file(reload=False):
@@ -41,16 +42,28 @@ def do_load_file(reload=False):
         print('> test=%d'%(dest.count()))
 
     #! step1. build-up lookuptable for destination.
-    dest.build_map()
+    ret = dest.build_map()
+    return ret
+
+# reset load to release memory.
+def do_reset_load():
+    fact = DataFactory.load()
+    fact.reset_all()
+    return True
 
 # transform test-date to temporal matrix-stack array.
-def do_transform_train():
+def prepare_transform_train():
     from DataReader import TransTrain00
     # load transformer.
     mstack = TransTrain00()
-    mstack.transform()
-    #mstack.transform(force=True)
-    mstack.test()
+    if not mstack.load_from_file():
+        do_load_file()
+        mstack.transform()
+        #mstack.transform(force=True)
+        mstack.test()
+        do_reset_load()
+
+    return mstack
 
 # Self Test Main.
 if __name__ == '__main__':
