@@ -490,8 +490,10 @@ class DataSheet(GzCsvReader):
             if matrix is not None:
                 from six.moves import cPickle
                 f = open(filename, 'wb')
-                cPickle.dump(matrix, f, protocol=cPickle.HIGHEST_PROTOCOL)
-                f.close()
+		try:
+                	cPickle.dump(matrix, f, protocol=cPickle.HIGHEST_PROTOCOL)
+		finally:
+                	f.close()
             print('> saved to file :'+filename)
             #end of cPickle
             return True
