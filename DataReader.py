@@ -169,6 +169,7 @@ class MatrixStack():
     # save matrix into file......................................
     # @return True if saved
     def save_to_file(self, name=None):
+        print("mstack.save_to_file(%s)...."%(name))
         filename = self.as_filename(name)
         self.pack()
         if self._matrix_list is not None:
@@ -184,6 +185,7 @@ class MatrixStack():
     # load matrix object from file...............................
     # @return True if load (and file exists)
     def load_from_file(self, name=None):
+        print("mstack.load_from_file(%s)...."%(name))
         import os.path
         filename = self.as_filename(name)
         self.reset()
@@ -480,6 +482,7 @@ class DataSheet(GzCsvReader):
 
     # save matrix to file
     def save_to_file(self, filename=None):
+        print("save_to_file(%s)...."%(filename))
         filename = filename if filename else (self._filename + ".dat")
         matrix = self._matrix if hasattr(self, '_matrix') else None
         try:
@@ -491,12 +494,19 @@ class DataSheet(GzCsvReader):
                 f.close()
             print('> saved to file :'+filename)
             #end of cPickle
+            return True
         except:
-            print('WARN! failed to save to file :'+filename)
-        return filename
+            print('WARN! failed to save to file, then try to delete :'+filename)
+            try:
+                import os
+                os.remove(filename)
+            except:
+                return False
+        return False
 
     # load matrix object from file.
     def load_from_file(self, filename=None):
+        print("load_from_file(%s)...."%(filename))
         import os.path
         filename = filename if filename else (self._filename + ".dat")
         matrix = None
@@ -510,7 +520,7 @@ class DataSheet(GzCsvReader):
         if matrix is not None:
             self._matrix = matrix
         print('> loaded from file :'+filename)
-        return filename
+        return True
 
     # clear all matrix data.
     def clear(self):
@@ -685,7 +695,10 @@ class DataFactory():
 
     # get DataReader instance for the given name
     def get(self, name):
-        return self._map[name]
+        try:
+            return self._map[name]
+        except:
+            return None
 
     #@staticmethod
     @classmethod
