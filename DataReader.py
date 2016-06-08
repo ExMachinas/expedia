@@ -132,7 +132,8 @@ class MatrixStack():
 
     # the count of array in _matrix (# of group of 256 matrix)
     def count(self):
-        return self._count/MATSTACK_GRP_SIZE
+        return max(self._count/MATSTACK_GRP_SIZE, len(self._matrix_list))
+
 
     # get np.array() matrix from to .............................
     def get(self, start, end=None):
@@ -203,8 +204,8 @@ class MatrixStack():
         filename = self.as_filename(name)
         print("mstack.load_from_file(%s)...."%(filename))
         self.reset()
-        matrix = None
-        matrix_y = None
+        matrix_list = None
+        matrix_list_y = None
         count = 0
 
         # check if file exists.
@@ -212,17 +213,17 @@ class MatrixStack():
             from six.moves import cPickle
             f = open(filename, 'rb')
             try:
-                (count, matrix, matrix_y) = cPickle.load(f)
+                (count, matrix_list, matrix_list_y) = cPickle.load(f)
             finally:
                 f.close()
         else:
             return False
 
         # check if data loaded.
-        if matrix is not None:
+        if matrix_list is not None:
             self._count = count
-            self._matrix_list = matrix
-            self._matrix_list_y = matrix_y
+            self._matrix_list = matrix_list
+            self._matrix_list_y = matrix_list_y
             print('matrix-stack: loaded from file :'+filename+", count="+str(count))
             return True
         else:
