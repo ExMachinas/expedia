@@ -10,46 +10,8 @@ from DataReader import MatrixStack
 def main():
     print("main()....")
 
-    print("=====================================")
-    print("Start: Data Conversion to Matrix file")
-    print("=====================================")
-    #do_load_file()             # load data.
-    #do_load_file(True)          # force to reload
-    #do_transform_train()        # transform data.
-    mstack = prepare_transform_train()
-    print("mstack.count = "+str(mstack.count()))
-
-    # prepare train/validation set (90%, 10%)
-    train_x = []
-    train_y = []
-    valid_x = []
-    valid_y = []
-    count = mstack.count()
-    for i in range(count):
-        (x, y) = (mstack._matrix_list[i], mstack._matrix_list_y[i])
-        if i % 10 != 2:
-            train_x.append(x)
-            train_y.append(y)
-        else:
-            valid_x.append(x)
-            valid_y.append(y)
-
-    train_x = np.vstack(train_x)
-    train_y = np.concatenate(train_y)
-    valid_x = np.vstack(valid_x)
-    valid_y = np.concatenate(valid_y)
-
-    print("train_x.count = %d, train_y.count = %d"%(len(train_x), len(train_y)))
-    print("valid_x.count = %d, valid_y.count = %d"%(len(valid_x), len(valid_y)))
-
-    # ok now save this data into file..
-    filename = "data/dataset-00.dat"
-    f = open(filename, 'wb')
-    try:
-        pickle.dump((train_x, train_y, valid_x, valid_y), f, protocol=pickle.HIGHEST_PROTOCOL)
-    finally:
-        f.close()
-    print('dataset-00: saved to file :'+filename)
+    # prepare dataset to run
+    prepare_dataset()
 
     # run sgd-optimization.
     sgd_optimization_mnist()
@@ -100,6 +62,63 @@ def prepare_transform_train():
         do_reset_load()
 
     return mstack
+
+# safe-loading dataset file.
+def prepare_dataset(filename = "data/dataset-00.dat"):
+    import os.path
+    if os.path.isfile(filename):
+        return True
+
+    # build dataset from mstack.
+
+    print("=====================================")
+    print("Start: Data Conversion to Matrix file")
+    print("=====================================")
+    #do_load_file()             # load data.
+    #do_load_file(True)          # force to reload
+    #do_transform_train()        # transform data.
+    mstack = prepare_transform_train()
+    print("mstack.count = "+str(mstack.count()))
+
+    # prepare train/validation set (90%, 10%)
+    train_x = []
+    train_y = []
+    valid_x = []
+    valid_y = []
+    count = mstack.count()
+    for i in range(count):
+        (x, y) = (mstack._matrix_list[i], mstack._matrix_list_y[i])
+        if i % 10 != 2:
+            train_x.append(x)
+            train_y.append(y)
+        else:
+            valid_x.append(x)
+            valid_y.append(y)
+
+    train_x = np.vstack(train_x)
+    train_y = np.concatenate(train_y)
+    valid_x = np.vstack(valid_x)
+    valid_y = np.concatenate(valid_y)
+
+    print("train_x.count = %d, train_y.count = %d"%(len(train_x), len(train_y)))
+    print("valid_x.count = %d, valid_y.count = %d"%(len(valid_x), len(valid_y)))
+
+    # ok now save this data into file..
+    f = open(filename, 'wb')
+    try:
+        pickle.dump((train_x, train_y, valid_x, valid_y), f, protocol=pickle.HIGHEST_PROTOCOL)
+    except:
+        print('%s: failed to save file'%(filename))
+        try:
+            import os
+            os.remove(filename)
+        except:
+            return False
+        return False
+    finally:
+        f.close()
+    print('%s: saved to file :'%(filename))
+    return True
 
 '''
 ------------------------------------------------------------------------------------
