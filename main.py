@@ -11,10 +11,15 @@ def main():
     print("main()....")
 
     # prepare dataset to run
-    prepare_dataset()
+    dataset = prepare_dataset()
 
-    # run sgd-optimization.
-    sgd_optimization_mnist()
+    # run sgd-optimization with given dataset.
+    if dataset is not None:
+        sgd_optimization_mnist(dataset=dataset)
+    else:
+        sgd_optimization_mnist()
+
+    print("finished....")
 
 # load data-files from cached file if possible.
 def do_load_file(reload=False):
@@ -67,7 +72,7 @@ def prepare_transform_train():
 def prepare_dataset(filename = "data/dataset-00.dat"):
     import os.path
     if os.path.isfile(filename):
-        return True
+        return None
 
     # build dataset from mstack.
 
@@ -113,12 +118,12 @@ def prepare_dataset(filename = "data/dataset-00.dat"):
             import os
             os.remove(filename)
         except:
-            return False
-        return False
+            return (train_x, train_y, valid_x, valid_y)
+        return (train_x, train_y, valid_x, valid_y)
     finally:
         f.close()
     print('%s: saved to file :'%(filename))
-    return True
+    return (train_x, train_y, valid_x, valid_y)
 
 '''
 ------------------------------------------------------------------------------------
@@ -165,12 +170,20 @@ class LogisticRegression(object):
             raise NotImplementedError()
 
 def load_data(dataset):
-    print('... loading data')
-    f = open(dataset, 'rb')
-    try:
-       (train_x, train_y, valid_x, valid_y) = pickle.load(f)
-    finally:
-        f.close()
+    print('... loading data (%s - type:%s)'%(dataset if type(dataset) is str else '', type(dataset)))
+
+    # load dataset if tuple. (train_x, train_y, valid_x, valid_y)
+    if type(dataset) is tuple:
+        (train_x, train_y, valid_x, valid_y) = dataset
+    elif type(dataset) is str:
+        f = open(dataset, 'rb')
+        try:
+           (train_x, train_y, valid_x, valid_y) = pickle.load(f)
+        finally:
+            f.close()
+    else:
+        print('WARN! unknown dataset type:%s'%(type(dataset)))
+        return False
 
     def shared_dataset(data_xy, borrow=True):
         data_x, data_y = data_xy
@@ -192,7 +205,7 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
 
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
-    test_set_x, test_set_y = datasets[2]
+    #test_set_x, test_set_y = datasets[2]
 
     # compute number of minibatches for training, validation and testing
     x_s = train_set_x.get_value(borrow=True).shape[1];
