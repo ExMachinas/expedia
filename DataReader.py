@@ -775,7 +775,8 @@ class TransTrain00(MatrixStack):
             SEASON = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
             SEASON_KEY = [0,0,1,1,1,2,2,2,3,3,3,0]      # season key by month.
             #ret.extend([d.year, d.month, d.day, d.weekday(), HOLIDAY[d.weekday()], d.hour])
-            ret += [d.year, HOLIDAY[d.weekday()]]
+            #ret += [d.year, HOLIDAY[d.weekday()]]
+            ret += [HOLIDAY[d.weekday()]]
             if isSeason:
                 ret += SEASON[SEASON_KEY[d.month-1]]
             return ret
@@ -803,6 +804,7 @@ class TransTrain00(MatrixStack):
             #TODO:XENI - dest_row can be None, for now ignore this case (TODO IMPROVE)
             if dest_row is None:
                 return (None, None)
+            row += dest_row
             return (row, R[train.hotel_cluster])
 
         @time_usage
