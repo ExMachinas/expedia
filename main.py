@@ -95,15 +95,17 @@ def prepare_dataset(filename = "data/dataset-00.dat"):
         (x, y) = (mstack._matrix_list[i], mstack._matrix_list_y[i])
         if i % 10 != 2:
             train_x.append(x)
-            train_y.append(y)
+            #train_y.append(y)
+            train_y += y
         else:
             valid_x.append(x)
-            valid_y.append(y)
+            #valid_y.append(y)
+            valid_y += y
 
     train_x = np.vstack(train_x)
-    train_y = np.concatenate(train_y)
+    #train_y = np.concatenate(train_y)
     valid_x = np.vstack(valid_x)
-    valid_y = np.concatenate(valid_y)
+    #valid_y = np.concatenate(valid_y)
 
     print("train_x.count = %d, train_y.count = %d"%(len(train_x), len(train_y)))
     print("valid_x.count = %d, valid_y.count = %d"%(len(valid_x), len(valid_y)))
