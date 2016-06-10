@@ -798,8 +798,8 @@ class TransTrain00(MatrixStack):
             row += [R[train.channel], R[train.is_mobile], R[train.is_package]]
             row += [R[train.srch_adults_cnt], R[train.srch_children_cnt], R[train.srch_rm_cnt]]
             # locations
-            row += [R[train.posa_continent], R[train.user_location_country], R[train.user_location_region], R[train.user_location_city]]
-            row += [R[train.srch_destination_type_id], R[train.hotel_continent], R[train.hotel_country], R[train.hotel_market]]
+            #row += [R[train.posa_continent], R[train.user_location_country], R[train.user_location_region], R[train.user_location_city]]
+            #row += [R[train.srch_destination_type_id], R[train.hotel_continent], R[train.hotel_country], R[train.hotel_market]]
             dest_row = dest.lookup(R[train.srch_destination_id])
             #TODO:XENI - dest_row can be None, for now ignore this case (TODO IMPROVE)
             if dest_row is None:

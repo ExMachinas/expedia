@@ -146,8 +146,17 @@ import theano.tensor as T
 
 class LogisticRegression(object):
     def __init__(self, input, n_in, n_out):
+        rng = numpy.random.RandomState(1234)
+        value = rng.uniform(
+            low=-numpy.sqrt(6. / (n_in + n_out)),
+            high=numpy.sqrt(6. / (n_in + n_out)),
+            size=(n_in, n_out)
+        )
+
         self.W = theano.shared(
-            value=numpy.zeros((n_in, n_out), dtype=theano.config.floatX),
+            #value=numpy.zeros((n_in, n_out), dtype=theano.config.floatX),
+            value=value,
+            #value=numpy.random.rand((n_in, n_out), dtype=theano.config.floatX),
             name='W',
             borrow=True
         )
@@ -203,7 +212,7 @@ def load_data(dataset):
     rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y), (test_set_x, test_set_y)]
     return rval
 
-def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
+def sgd_optimization_mnist(learning_rate=0.00001, n_epochs=1000,
                            dataset='data/dataset-00.dat',
                            batch_size=600):
     datasets = load_data(dataset)
@@ -239,6 +248,7 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
     validate_model = theano.function(
         inputs=[index],
         outputs=classifier.errors(y),
+        #outputs=classifier.negative_log_likelihood(y),
         givens={
             x: valid_set_x[index * batch_size: (index + 1) * batch_size],
             y: valid_set_y[index * batch_size: (index + 1) * batch_size]
@@ -277,11 +287,14 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
 
     done_looping = False
     epoch = 0
+    # n_epochs = 1
+    # n_train_batches = 10
     while (epoch < n_epochs) and (not done_looping):
         epoch = epoch + 1
         for minibatch_index in range(n_train_batches):
 
             minibatch_avg_cost = train_model(minibatch_index)
+            # print('minibatch_avg_cost %f %%' %(minibatch_avg_cost))
             # iteration number
             iter = (epoch - 1) * n_train_batches + minibatch_index
 
@@ -329,7 +342,8 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
                         )
                     )
                     '''
-                    print('Best Model: epoch %i, minibatch %i/%i, load %f %% '%(epoch, minibatch_index + 1, minibatch_index, best_validation_loss))
+                    print('Best Model: epoch %i, minibatch %i/%i, load %f %% '%(epoch, minibatch_index + 1,
+                                                                        minibatch_index, best_validation_loss*100))
 
                     # save the best model
                     with open('best_model.pkl', 'wb') as f:
