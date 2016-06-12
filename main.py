@@ -15,9 +15,13 @@ def main():
 
     # run sgd-optimization with given dataset.
     if dataset is not None:
-        sgd_optimization_mnist(dataset=dataset)
+        #sgd_optimization_mnist(dataset=dataset)
+        #test_mlp(dataset=dataset)
+        test_keras(dataset)
     else:
-        sgd_optimization_mnist()
+        #sgd_optimization_mnist()
+        #test_mlp()
+        test_keras()
 
     print("finished....")
 
@@ -110,8 +114,9 @@ def prepare_dataset(filename = "data/dataset-00.dat"):
     print("train_x.count = %d, train_y.count = %d"%(len(train_x), len(train_y)))
     print("valid_x.count = %d, valid_y.count = %d"%(len(valid_x), len(valid_y)))
     print('-------------- test data')
-    print(train_x[1])
-    print('y=', train_y[1], type(train_y[1]))
+    prnt_idx = 5
+    print('x[%d]='%(prnt_idx), train_x[prnt_idx])
+    print('y[%d]='%(prnt_idx), train_y[prnt_idx])
 
     # ok now save this data into file..
     f = open(filename, 'wb')
@@ -133,6 +138,7 @@ def prepare_dataset(filename = "data/dataset-00.dat"):
 '''
 ------------------------------------------------------------------------------------
 -- logistic-sgd
+------------------------------------------------------------------------------------
 '''
 import gzip
 import os
@@ -183,7 +189,7 @@ class LogisticRegression(object):
         else:
             raise NotImplementedError()
 
-def load_data(dataset):
+def load_data(dataset, use_shared=True):
     print('... loading data (%s - type:%s)'%(dataset if type(dataset) is str else '', type(dataset)))
 
     # load dataset if tuple. (train_x, train_y, valid_x, valid_y)
@@ -205,14 +211,20 @@ def load_data(dataset):
         shared_y = theano.shared(numpy.asarray(data_y, dtype=theano.config.floatX), borrow=borrow)
         return shared_x, T.cast(shared_y, 'int32')
 
-    test_set_x, test_set_y = shared_dataset(([],[]))
-    valid_set_x, valid_set_y = shared_dataset((valid_x, valid_y))
-    train_set_x, train_set_y = shared_dataset((train_x, train_y))
+    if use_shared:
+        test_set_x, test_set_y = shared_dataset(([],[]))
+        valid_set_x, valid_set_y = shared_dataset((valid_x, valid_y))
+        train_set_x, train_set_y = shared_dataset((train_x, train_y))
+    else:
+        test_set_x, test_set_y = ([],[])
+        valid_set_x, valid_set_y = (valid_x, valid_y)
+        train_set_x, train_set_y = (train_x, train_y)
+
 
     rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y), (test_set_x, test_set_y)]
     return rval
 
-def sgd_optimization_mnist(learning_rate=0.00001, n_epochs=1000,
+def sgd_optimization_mnist(learning_rate=0.000000001, n_epochs=1000,
                            dataset='data/dataset-00.dat',
                            batch_size=600):
     datasets = load_data(dataset)
@@ -368,7 +380,291 @@ def sgd_optimization_mnist(learning_rate=0.00001, n_epochs=1000,
            ' ran for %.1fs' % ((end_time - start_time)))
 
 
+'''
+------------------------------------------------------------------------------------
+-- mlp
+------------------------------------------------------------------------------------
+'''
+import os
+import sys
+import timeit
+
+import numpy
+
+import theano
+import theano.tensor as T
+
+# start-snippet-1
+class HiddenLayer(object):
+    def __init__(self, rng, input, n_in, n_out, W=None, b=None, activation=T.tanh):
+        self.input = input
+        if W is None:
+            W_values = numpy.asarray(
+                rng.uniform(
+                    low=-numpy.sqrt(6. / (n_in + n_out)),
+                    high=numpy.sqrt(6. / (n_in + n_out)),
+                    size=(n_in, n_out)
+                ),
+                dtype=theano.config.floatX
+            )
+            if activation == theano.tensor.nnet.sigmoid:
+                W_values *= 4
+
+            W = theano.shared(value=W_values, name='W', borrow=True)
+
+        if b is None:
+            b_values = numpy.zeros((n_out,), dtype=theano.config.floatX)
+            b = theano.shared(value=b_values, name='b', borrow=True)
+
+        self.W = W
+        self.b = b
+
+        lin_output = T.dot(input, self.W) + self.b
+        self.output = (
+            lin_output if activation is None
+            else activation(lin_output)
+        )
+        # parameters of the model
+        self.params = [self.W, self.b]
+
+class MLP(object):
+    def __init__(self, rng, input, n_in, n_hidden, n_out):
+        self.hiddenLayer = HiddenLayer(
+            rng=rng,
+            input=input,
+            n_in=n_in,
+            n_out=n_hidden,
+            activation=T.tanh
+        )
+        self.logRegressionLayer = LogisticRegression(
+            input=self.hiddenLayer.output,
+            n_in=n_hidden,
+            n_out=n_out
+        )
+        self.L1 = (
+            abs(self.hiddenLayer.W).sum()
+            + abs(self.logRegressionLayer.W).sum()
+        )
+        self.L2_sqr = (
+            (self.hiddenLayer.W ** 2).sum()
+            + (self.logRegressionLayer.W ** 2).sum()
+        )
+        self.negative_log_likelihood = (
+            self.logRegressionLayer.negative_log_likelihood
+        )
+        self.errors = self.logRegressionLayer.errors
+        self.params = self.hiddenLayer.params + self.logRegressionLayer.params
+        self.input = input
+
+def test_mlp(learning_rate=0.0001, L1_reg=0.00, L2_reg=0.001, n_epochs=1000,
+             dataset='mnist.pkl.gz', batch_size=600000, n_hidden=100):
+
+    datasets = load_data(dataset)
+    train_set_x, train_set_y = datasets[0]
+    valid_set_x, valid_set_y = datasets[1]
+    #test_set_x, test_set_y = datasets[2]
+
+    x_s = train_set_x.get_value(borrow=True).shape[1];
+    n_train_batches = train_set_x.get_value(borrow=True).shape[0] // batch_size
+    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] // batch_size
+    #n_test_batches = test_set_x.get_value(borrow=True).shape[0] // batch_size
+
+    ######################
+    # BUILD ACTUAL MODEL #
+    ######################
+    print('... building the model')
+
+    # allocate symbolic variables for the data
+    index = T.lscalar()  # index to a [mini]batch
+    x = T.matrix('x')  # the data is presented as rasterized images
+    y = T.ivector('y')  # the labels are presented as 1D vector of [int] labels
+
+    rng = numpy.random.RandomState(1234)
+
+    # construct the MLP class
+    classifier = MLP(
+        rng=rng, input=x, n_in=x_s,
+        n_hidden=n_hidden, n_out=100
+    )
+    cost = (classifier.negative_log_likelihood(y) + L1_reg * classifier.L1 + L2_reg * classifier.L2_sqr)
+
+    # test_model = theano.function(
+    #     inputs=[index],
+    #     outputs=classifier.errors(y),
+    #     givens={
+    #         x: test_set_x[index * batch_size:(index + 1) * batch_size],
+    #         y: test_set_y[index * batch_size:(index + 1) * batch_size]
+    #     }
+    # )
+
+    validate_model = theano.function(
+        inputs=[index],
+        outputs=classifier.errors(y),
+        givens={
+            x: valid_set_x[index * batch_size:(index + 1) * batch_size],
+            y: valid_set_y[index * batch_size:(index + 1) * batch_size]
+        }
+    )
+    gparams = [T.grad(cost, param) for param in classifier.params]
+    updates = [
+        (param, param - learning_rate * gparam)
+        for param, gparam in zip(classifier.params, gparams)
+    ]
+    train_model = theano.function(
+        inputs=[index],
+        outputs=cost,
+        updates=updates,
+        givens={
+            x: train_set_x[index * batch_size: (index + 1) * batch_size],
+            y: train_set_y[index * batch_size: (index + 1) * batch_size]
+        }
+    )
+
+    ###############
+    # TRAIN MODEL #
+    ###############
+    print('... training')
+
+    # early-stopping parameters
+    patience = 10000  # look as this many examples regardless
+    patience_increase = 2  # wait this much longer when a new best is found
+    improvement_threshold = 0.995  # a relative improvement of this much is
+    validation_frequency = min(n_train_batches, patience // 2)
+
+    best_validation_loss = numpy.inf
+    best_iter = 0
+    test_score = 0.
+    start_time = timeit.default_timer()
+
+    epoch = 0
+    done_looping = False
+
+    print("n_train_batches = %d"%(n_train_batches))
+    while (epoch < n_epochs) and (not done_looping):
+        epoch = epoch + 1
+        for minibatch_index in range(n_train_batches):
+
+            minibatch_avg_cost = train_model(minibatch_index)
+            if minibatch_index % 100 == 0:
+                print('minibatch_avg_cost: %f'%(minibatch_avg_cost))
+            # iteration number
+            iter = (epoch - 1) * n_train_batches + minibatch_index
+
+            if (iter + 1) % validation_frequency == 0:
+                # compute zero-one loss on validation set
+                validation_losses = [validate_model(i) for i
+                                     in range(n_valid_batches)]
+                this_validation_loss = numpy.mean(validation_losses)
+
+                print(
+                    'epoch %i, minibatch %i/%i, validation error %f %%' %
+                    (
+                        epoch,
+                        minibatch_index + 1,
+                        n_train_batches,
+                        this_validation_loss * 100.
+                    )
+                )
+
+                # if we got the best validation score until now
+                if this_validation_loss < best_validation_loss:
+                    #improve patience if loss improvement is good enough
+                    if (
+                        this_validation_loss < best_validation_loss *
+                        improvement_threshold
+                    ):
+                        patience = max(patience, iter * patience_increase)
+
+                    best_validation_loss = this_validation_loss
+                    best_iter = iter
+
+                    # # test it on the test set
+                    # test_losses = [test_model(i) for i
+                    #                in range(n_test_batches)]
+                    # test_score = numpy.mean(test_losses)
+                    #
+                    # print(('     epoch %i, minibatch %i/%i, test error of '
+                    #        'best model %f %%') %
+                    #       (epoch, minibatch_index + 1, n_train_batches,
+                    #        test_score * 100.))
+
+            if False and patience <= iter:
+                done_looping = True
+                break
+
+    end_time = timeit.default_timer()
+    print(('Optimization complete. Best validation score of %f %% '
+           'obtained at iteration %i, with test performance %f %%') %
+          (best_validation_loss * 100., best_iter + 1, test_score * 100.))
+    print(('The code for file ' +
+           os.path.split(__file__)[1] +
+           ' ran for %.2fm' % ((end_time - start_time) / 60.)))
+
 def predict():
+    return
+
+'''
+------------------------------------------------------------------------------------
+-- keras vanilla model
+------------------------------------------------------------------------------------
+'''
+def test_keras(dataset, batch_size=600000):
+    from keras.models import Sequential
+    from keras.layers import Dense, Activation, Dropout
+    from keras.optimizers import SGD, Adam, RMSprop
+    from keras.utils import np_utils
+
+    # load dataset.
+    datasets = load_data(dataset, use_shared=False)
+    train_set_x, train_set_y = datasets[0]
+    valid_set_x, valid_set_y = datasets[1]
+
+    train_set_y = train_set_y.astype('int32')
+    valid_set_y = valid_set_y.astype('int32')
+
+    in_dim = train_set_x.shape[1]
+    nb_classes = 100
+    nb_epoch = 25
+
+    print(train_set_x.shape[0], 'train_x samples')
+    print(train_set_y.shape[0], 'train_y samples')
+
+    # convert class vectors to binary class matrices
+    train_set_y = np_utils.to_categorical(train_set_y, nb_classes)
+    valid_set_y = np_utils.to_categorical(valid_set_y, nb_classes)
+
+    ######################
+    # BUILD ACTUAL MODEL #
+    ######################
+    print('... building the model')
+
+    model = Sequential()
+    model.add(Dense(output_dim=100, input_dim=in_dim))
+    model.add(Activation("relu"))
+    model.add(Dropout(0.2))
+    model.add(Dense(100))
+    model.add(Activation("relu"))
+    model.add(Dropout(0.2))
+    model.add(Dense(output_dim=nb_classes))
+    model.add(Activation("softmax"))
+
+    model.summary()
+
+    #model.compile(loss='categorical_crossentropy', optimizer=RMSprop(), metrics=['accuracy'])
+    #model.compile(loss='categorical_crossentropy', optimizer='sgd', metrics=['accuracy'])
+    model.compile(loss='categorical_crossentropy', optimizer=SGD(lr=0.1, momentum=0.9, nesterov=True), metrics=['accuracy'])
+    #model.compile(loss='categorical_crossentropy', optimizer=SGD(lr=0.01))
+
+
+    #model.fit(train_set_x, train_set_y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=1, validation_data=(valid_set_x, valid_set_x))
+    model.fit(train_set_x, train_set_y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=1)
+    #model.train_on_batch(X_batch, Y_batch)
+    #loss_and_metrics = model.evaluate(X_test, Y_test, batch_size=batch_size)
+
+    score = model.evaluate(valid_set_x, valid_set_y, verbose=0)
+    print('Test score:', score[0])
+    print('Test accuracy:', score[1])
+
     return
 
 #############################

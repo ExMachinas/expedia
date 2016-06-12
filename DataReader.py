@@ -809,14 +809,21 @@ class TransTrain00(MatrixStack):
 
         @time_usage
         def run_transform(mstack):
+            total_count = 0
+            total_ignored = 0
             #test-case : enumerate each set.
             for i,R in enumerate(train._matrix):
+                total_count+=1
                 (row, row_y) = trans_train_row(i, R, train)
-                if row is None: continue
+                if row is None:
+                    total_ignored+=1
+                    continue
                 #if i > 1000: break   #TODO:XENI - for test
                 #mstack.push(row, row_y, np.int32)
                 mstack.push(row, row_y, np.float32)
                 #print(str(DTR(R[train.date_time]))+':'+str(row))
+
+            print("transform: total = %d, ignored=%d (%f %%)"%(total_count, total_ignored, 100.*total_ignored/total_count))
 
         # MatrixStack
         #mstack = MatrixStack()
