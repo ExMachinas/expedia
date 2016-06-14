@@ -7,11 +7,14 @@ from DataReader import DataFactory
 from DataReader import DTR                      # DateTime Reverse Function.
 from DataReader import MatrixStack
 
-def main():
-    print("main()....")
+def main(useKeras = True):
+    print("main(Keras=%s)...."%("Yes" if useKeras else "No"))
 
     # prepare dataset to run
-    dataset = prepare_dataset()
+    if useKeras:
+        dataset = prepare_dataset_for_keras()
+    else:
+        dataset = prepare_dataset()
 
     # run sgd-optimization with given dataset.
     if dataset is not None:
@@ -19,9 +22,7 @@ def main():
         #test_mlp(dataset=dataset)
         test_keras(dataset)
     else:
-        #sgd_optimization_mnist()
-        #test_mlp()
-        test_keras()
+        raise("dataset is not loaded!")
 
     print("finished....")
 
@@ -74,9 +75,9 @@ def prepare_transform_train():
 
 # safe-loading dataset file.
 def prepare_dataset(filename = "data/dataset-00.dat"):
-    import os.path
-    if os.path.isfile(filename):
-        return None
+    # import os.path
+    # if os.path.isfile(filename):
+    #     return None
 
     # build dataset from mstack.
 
@@ -118,21 +119,69 @@ def prepare_dataset(filename = "data/dataset-00.dat"):
     print('x[%d]='%(prnt_idx), train_x[prnt_idx])
     print('y[%d]='%(prnt_idx), train_y[prnt_idx])
 
-    # ok now save this data into file..
-    f = open(filename, 'wb')
-    try:
-        pickle.dump((train_x, train_y, valid_x, valid_y), f, protocol=pickle.HIGHEST_PROTOCOL)
-    except:
-        print('%s: failed to save file'%(filename))
-        try:
-            import os
-            os.remove(filename)
-        except:
-            return (train_x, train_y, valid_x, valid_y)
-        return (train_x, train_y, valid_x, valid_y)
-    finally:
-        f.close()
-    print('%s: saved to file :'%(filename))
+    # # ok now save this data into file..
+    # f = open(filename, 'wb')
+    # try:
+    #     pickle.dump((train_x, train_y, valid_x, valid_y), f, protocol=pickle.HIGHEST_PROTOCOL)
+    # except:
+    #     print('%s: failed to save file'%(filename))
+    #     try:
+    #         import os
+    #         os.remove(filename)
+    #     except:
+    #         return (train_x, train_y, valid_x, valid_y)
+    #     return (train_x, train_y, valid_x, valid_y)
+    # finally:
+    #     f.close()
+    # print('%s: saved to file :'%(filename))
+    return (train_x, train_y, valid_x, valid_y)
+
+
+# safe-loading dataset file.(X, OneHat(Y))
+def prepare_dataset_for_keras(filename = "data/dataset-ks.dat"):
+    print("prepare_dataset_for_keras(%s)...."%(filename))
+    print("=====================================")
+    print("Start: Data Loading from Matrix file")
+    print("=====================================")
+
+    from keras.utils import np_utils
+
+    mstack = prepare_transform_train()
+    print("> mstack.count = "+str(mstack.count()))
+
+    # prepare train/validation set (90%, 10%)
+    train_x = []
+    train_y = []
+    valid_x = []
+    valid_y = []
+    count = mstack.count()
+    for i in range(count):
+        (x, y) = (mstack._matrix_list[i], mstack._matrix_list_y[i])
+        y = np_utils.to_categorical(y, 100)
+        y = y.astype('int32')       # convert to int32
+
+        if i % 10 != 2:
+            train_x.append(x)
+            train_y.append(y)
+            #train_y += y
+        else:
+            valid_x.append(x)
+            valid_y.append(y)
+            #valid_y += y
+
+    train_x = np.vstack(train_x)
+    train_y = np.vstack(train_y)
+    valid_x = np.vstack(valid_x)
+    valid_y = np.vstack(valid_y)
+
+    print("> train_x.count = %d, train_y.count = %d"%(len(train_x), len(train_y)))
+    print("> valid_x.count = %d, valid_y.count = %d"%(len(valid_x), len(valid_y)))
+    print('-------------- test data')
+    for prnt_idx in [3,5,9]:            # Y must be 92 at 5th.
+        print('> x[%d]='%(prnt_idx), train_x[prnt_idx])
+        print('> y[%d]='%(prnt_idx), train_y[prnt_idx])
+        print('> max-index=%d'%(int(T.argmax(train_y[prnt_idx]).eval())))
+
     return (train_x, train_y, valid_x, valid_y)
 
 '''
@@ -609,6 +658,11 @@ def predict():
 ------------------------------------------------------------------------------------
 '''
 def test_keras(dataset, batch_size=600000):
+    print('test_keras(batch_size=%d)...'%(batch_size))
+    #from __future__ import print_function
+    import numpy as np
+    np.random.seed(1337)  # for reproducibility
+
     from keras.models import Sequential
     from keras.layers import Dense, Activation, Dropout
     from keras.optimizers import SGD, Adam, RMSprop
@@ -619,19 +673,25 @@ def test_keras(dataset, batch_size=600000):
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
 
-    train_set_y = train_set_y.astype('int32')
-    valid_set_y = valid_set_y.astype('int32')
-
+    # definitions
     in_dim = train_set_x.shape[1]
-    nb_classes = 100
+    out_dim = 100 if train_set_y.ndim == 1 else train_set_y.shape[1]
     nb_epoch = 25
 
-    print(train_set_x.shape[0], 'train_x samples')
-    print(train_set_y.shape[0], 'train_y samples')
+    print('> train_x samples = %d, ndim=%d'%(train_set_x.shape[0], train_set_x.ndim), train_set_x.shape)
+    print('> train_y samples = %d, ndim=%d'%(train_set_y.shape[0], train_set_y.ndim), train_set_y.shape)
 
-    # convert class vectors to binary class matrices
-    train_set_y = np_utils.to_categorical(train_set_y, nb_classes)
-    valid_set_y = np_utils.to_categorical(valid_set_y, nb_classes)
+    # convert to unit vector if not initiaize.
+    print('> train_set_y.shape=',train_set_y.shape)
+    if train_set_y.ndim == 1:
+        print('> > try to make categorical by %d'%(out_dim))
+        # at first, convert to int32
+        train_set_y = train_set_y.astype('int32')
+        valid_set_y = valid_set_y.astype('int32')
+        # convert class vectors to binary class matrices
+        train_set_y = np_utils.to_categorical(train_set_y, out_dim)
+        valid_set_y = np_utils.to_categorical(valid_set_y, out_dim)
+
 
     ######################
     # BUILD ACTUAL MODEL #
@@ -645,7 +705,7 @@ def test_keras(dataset, batch_size=600000):
     model.add(Dense(100))
     model.add(Activation("relu"))
     model.add(Dropout(0.2))
-    model.add(Dense(output_dim=nb_classes))
+    model.add(Dense(output_dim=out_dim))
     model.add(Activation("softmax"))
 
     model.summary()
