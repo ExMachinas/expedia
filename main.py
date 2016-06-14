@@ -154,33 +154,57 @@ def prepare_dataset_for_keras(filename = "data/dataset-ks.dat"):
     train_y = []
     valid_x = []
     valid_y = []
+
+    train_y_v = []
+    valid_y_v = []
+
     count = mstack.count()
     for i in range(count):
         (x, y) = (mstack._matrix_list[i], mstack._matrix_list_y[i])
-        y = np_utils.to_categorical(y, 100)
-        y = y.astype('int32')       # convert to int32
+        y2 = np_utils.to_categorical(y, 100)
+        y2 = y2.astype('int32')       # convert to int32
 
         if i % 10 != 2:
             train_x.append(x)
-            train_y.append(y)
-            #train_y += y
+            train_y.append(y2)
+            train_y_v += y
         else:
             valid_x.append(x)
-            valid_y.append(y)
-            #valid_y += y
+            valid_y.append(y2)
+            valid_y_v += y
 
+    print("> v-stack ......")
     train_x = np.vstack(train_x)
     train_y = np.vstack(train_y)
     valid_x = np.vstack(valid_x)
     valid_y = np.vstack(valid_y)
 
+    #train_y_v = train_y_v.astype('int32')
+    #valid_y_v = valid_y_v.astype('int32')
+
+    def print_stat(arr):
+        from itertools import groupby
+        #import copy
+        #import pprint
+        #arr = copy.deepcopy(arr)
+        arr.sort()
+        grps = ((k, len(list(g))) for k, g in groupby(arr))        # group counting.
+        stat = np.fromiter(grps, dtype='u2,u2')
+        print (stat)
+        #pprint.pprint(stat)
+
+    print("> train_y stat ......")
+    print_stat(train_y_v)
+    print("> valid_y stat ......")
+    print_stat(valid_y_v)
+
     print("> train_x.count = %d, train_y.count = %d"%(len(train_x), len(train_y)))
     print("> valid_x.count = %d, valid_y.count = %d"%(len(valid_x), len(valid_y)))
     print('-------------- test data')
-    for prnt_idx in [3,5,9]:            # Y must be 92 at 5th.
+    for prnt_idx in [5]:            # Y must be 92 at 5th.
         print('> x[%d]='%(prnt_idx), train_x[prnt_idx])
         print('> y[%d]='%(prnt_idx), train_y[prnt_idx])
-        print('> max-index=%d'%(int(T.argmax(train_y[prnt_idx]).eval())))
+        print('> max-index[%d]=%d'%(prnt_idx, int(T.argmax(train_y[prnt_idx]).eval())))
 
     return (train_x, train_y, valid_x, valid_y)
 
@@ -675,8 +699,9 @@ def test_keras(dataset, batch_size=600000):
 
     # definitions
     in_dim = train_set_x.shape[1]
+    mid_dim = in_dim
     out_dim = 100 if train_set_y.ndim == 1 else train_set_y.shape[1]
-    nb_epoch = 25
+    nb_epoch = 250
 
     print('> train_x samples = %d, ndim=%d'%(train_set_x.shape[0], train_set_x.ndim), train_set_x.shape)
     print('> train_y samples = %d, ndim=%d'%(train_set_y.shape[0], train_set_y.ndim), train_set_y.shape)
@@ -699,10 +724,10 @@ def test_keras(dataset, batch_size=600000):
     print('... building the model')
 
     model = Sequential()
-    model.add(Dense(output_dim=100, input_dim=in_dim))
+    model.add(Dense(output_dim=mid_dim, input_dim=in_dim))
     model.add(Activation("relu"))
     model.add(Dropout(0.2))
-    model.add(Dense(100))
+    model.add(Dense(mid_dim))
     model.add(Activation("relu"))
     model.add(Dropout(0.2))
     model.add(Dense(output_dim=out_dim))
