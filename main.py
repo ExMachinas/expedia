@@ -843,9 +843,10 @@ def test_keras_CNN(dataset, batch_size=60000):
 
     #model.compile(loss='categorical_crossentropy', optimizer=RMSprop(), metrics=['accuracy'])
     #model.compile(loss='categorical_crossentropy', optimizer='sgd', metrics=['accuracy'])
-    model.compile(loss='categorical_crossentropy', optimizer=SGD(lr=0.1, momentum=0.9, nesterov=True), metrics=['accuracy'])
+    #model.compile(loss='categorical_crossentropy', optimizer=SGD(lr=0.1, momentum=0.9, nesterov=True), metrics=['accuracy'])
     #model.compile(loss='categorical_crossentropy', optimizer=SGD(lr=0.01))
-
+    model.compile(loss='categorical_crossentropy',optimizer='adam',metrics=['accuracy'])
+    print('> optimizer=', 'categorical_crossentropy', 'adam')
 
     #model.fit(train_set_x, train_set_y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=1, validation_data=(valid_set_x, valid_set_x))
     model.fit(train_set_x, train_set_y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=1)
