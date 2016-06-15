@@ -20,7 +20,8 @@ def main(useKeras = True):
     if dataset is not None:
         #sgd_optimization_mnist(dataset=dataset)
         #test_mlp(dataset=dataset)
-        test_keras(dataset)
+        #test_keras(dataset)
+        test_keras_CNN(dataset)
     else:
         raise("dataset is not loaded!")
 
@@ -730,6 +731,111 @@ def test_keras(dataset, batch_size=600000):
     model.add(Dense(mid_dim))
     model.add(Activation("relu"))
     model.add(Dropout(0.2))
+    model.add(Dense(output_dim=out_dim))
+    model.add(Activation("softmax"))
+
+    model.summary()
+
+    #model.compile(loss='categorical_crossentropy', optimizer=RMSprop(), metrics=['accuracy'])
+    #model.compile(loss='categorical_crossentropy', optimizer='sgd', metrics=['accuracy'])
+    model.compile(loss='categorical_crossentropy', optimizer=SGD(lr=0.1, momentum=0.9, nesterov=True), metrics=['accuracy'])
+    #model.compile(loss='categorical_crossentropy', optimizer=SGD(lr=0.01))
+
+
+    #model.fit(train_set_x, train_set_y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=1, validation_data=(valid_set_x, valid_set_x))
+    model.fit(train_set_x, train_set_y, nb_epoch=nb_epoch, batch_size=batch_size, verbose=1)
+    #model.train_on_batch(X_batch, Y_batch)
+    #loss_and_metrics = model.evaluate(X_test, Y_test, batch_size=batch_size)
+
+    score = model.evaluate(valid_set_x, valid_set_y, verbose=0)
+    print('Test score:', score[0])
+    print('Test accuracy:', score[1])
+
+    return
+
+'''
+------------------------------------------------------------------------------------
+-- keras vanilla model 2 with Convolution
+------------------------------------------------------------------------------------
+'''
+def test_keras_CNN(dataset, batch_size=60000):
+    print('test_keras_CNN(batch_size=%d)...'%(batch_size))
+    #from __future__ import print_function
+    import numpy as np
+    np.random.seed(1337)  # for reproducibility
+
+    from keras.models import Sequential
+    from keras.layers import Dense, Activation, Dropout, Convolution1D, Convolution2D, Lambda, MaxPooling1D, MaxPooling2D, Flatten
+    from keras.optimizers import SGD, Adam, RMSprop
+    from keras.utils import np_utils
+    from keras import backend as K
+
+    # load dataset.
+    datasets = load_data(dataset, use_shared=False)
+    train_set_x, train_set_y = datasets[0]
+    valid_set_x, valid_set_y = datasets[1]
+
+    # definitions
+    in_dim = train_set_x.shape[1]
+    mid_dim = 100   #in_dim
+    out_dim = 100 if train_set_y.ndim == 1 else train_set_y.shape[1]
+    nb_epoch = 200
+
+    print('> train_x samples = %d, ndim=%d'%(train_set_x.shape[0], train_set_x.ndim), train_set_x.shape)
+    print('> train_y samples = %d, ndim=%d'%(train_set_y.shape[0], train_set_y.ndim), train_set_y.shape)
+
+    # convert to unit vector if not initiaize.
+    print('> train_set_y.shape=',train_set_y.shape)
+    if train_set_y.ndim == 1:
+        print('> > try to make categorical by %d'%(out_dim))
+        # at first, convert to int32
+        train_set_y = train_set_y.astype('int32')
+        valid_set_y = valid_set_y.astype('int32')
+        # convert class vectors to binary class matrices
+        train_set_y = np_utils.to_categorical(train_set_y, out_dim)
+        valid_set_y = np_utils.to_categorical(valid_set_y, out_dim)
+
+    use_2D = False
+
+    if use_2D:
+        print('.... reshape-2D x')     # shape of vector x must be 164 = 4*41
+        train_set_x = train_set_x.reshape(train_set_x.shape[0],1, 4, 41)
+        valid_set_x = valid_set_x.reshape(valid_set_x.shape[0],1, 4, 41)
+    else:
+        print('.... reshape-1D x')     # shape of vector x must be 164 = 4*41
+        train_set_x = train_set_x.reshape(train_set_x.shape[0],4, 41)
+        valid_set_x = valid_set_x.reshape(valid_set_x.shape[0],4, 41)
+        mid_dim = 128
+
+
+    ######################
+    # BUILD ACTUAL MODEL #
+    ######################
+    print('... building the model')
+    print('input-x.shape', train_set_x.shape)
+
+    def max_1d(X):
+       return K.max(X, axis=1)
+
+    model = Sequential()
+    if use_2D:
+        model.add(Convolution2D(32, 3, 3, border_mode='valid', activation='relu', input_shape=(1, 4, 41)))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+        model.add(Flatten())
+    else:
+        #model.add(Convolution1D(32, 3, border_mode='valid', activation='relu', input_length=938108, input_dim=in_dim))
+        #model.add(Convolution1D(32, 3, border_mode='valid', activation='relu', input_shape=(1, 164)))
+        model.add(Convolution1D(32, 3, border_mode='valid', activation='relu', input_shape=(4, 41), subsample_length=1))
+        #model.add(Lambda(max_1d, output_shape=(164,)))
+        model.add(MaxPooling1D(pool_length=2))
+        model.add(Flatten())
+
+    model.add(Dense(mid_dim))
+    model.add(Activation("relu"))
+    model.add(Dropout(0.2))
+    model.add(Dense(mid_dim))
+    model.add(Activation("relu"))
+    model.add(Dropout(0.5))
     model.add(Dense(output_dim=out_dim))
     model.add(Activation("softmax"))
 
