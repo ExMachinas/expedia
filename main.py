@@ -836,6 +836,12 @@ def test_keras_CNN(dataset, batch_size=60000):
     model.add(Dense(mid_dim))
     model.add(Activation("relu"))
     model.add(Dropout(0.5))
+    model.add(Dense(mid_dim))
+    model.add(Activation("relu"))
+    model.add(Dropout(0.5))
+    model.add(Dense(mid_dim))
+    model.add(Activation("relu"))
+    model.add(Dropout(0.5))
     model.add(Dense(output_dim=out_dim))
     model.add(Activation("softmax"))
 
